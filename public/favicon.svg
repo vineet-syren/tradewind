@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#0B1F2A" />
+  <!-- wind / wave currents -->
+  <path d="M12 24 q10 -8 20 0 t20 0" fill="none" stroke="#2FB8A6" stroke-width="4" stroke-linecap="round" />
+  <path d="M12 34 q10 -8 20 0 t20 0" fill="none" stroke="#0C8B7B" stroke-width="4" stroke-linecap="round" />
+  <path d="M12 44 q10 -8 20 0 t20 0" fill="none" stroke="#15705F" stroke-width="4" stroke-linecap="round" />
+</svg>
