@@ -96,17 +96,22 @@ export default function RouteModeDecisioningPage() {
 
       <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', lg: '1fr 1.55fr' }, mt: 3 }}>
         <Box>
-          <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
-            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-              Lanes ranked
-            </Typography>
+          <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1} sx={{ mb: 1.5 }}>
+            <Box>
+              <Typography variant="subtitle1" sx={{ fontWeight: 700, lineHeight: 1.2 }}>
+                Shipment lanes
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Ranked by {LIST_SORTS.find((s) => s.key === listSort)?.label.toLowerCase()} · highest first
+              </Typography>
+            </Box>
             <TextField
               select
               size="small"
-              label="Sort by"
+              label="Rank by"
               value={listSort}
               onChange={(e) => setListSort(e.target.value as ListSortKey)}
-              sx={{ width: 180 }}
+              sx={{ width: 180, flexShrink: 0 }}
             >
               {LIST_SORTS.map((s) => (
                 <MenuItem key={s.key} value={s.key}>

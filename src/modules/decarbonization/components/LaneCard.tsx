@@ -12,7 +12,7 @@ export function LaneCard({ lane, onClick, selected = false }: { lane: Lane; onCl
       onClick={onClick}
       sx={{
         cursor: onClick ? 'pointer' : 'default',
-        height: '100%',
+        flexShrink: 0, // never squash in a flex column list
         borderColor: selected ? 'primary.main' : undefined,
         borderWidth: selected ? 2 : 1,
         borderStyle: 'solid',
