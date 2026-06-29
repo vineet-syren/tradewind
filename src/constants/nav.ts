@@ -25,7 +25,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
     ],
   },
   {
-    heading: 'ACT',
+    heading: 'CONCIERGE',
     items: [
       { label: 'Action Center', to: '/actions', iconKey: 'actions' },
       { label: 'Recommendations', to: '/recommendations', iconKey: 'recommendations' },

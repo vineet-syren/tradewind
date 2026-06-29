@@ -12,10 +12,16 @@ export function BrandMark({ dark = false, compact = false }: { dark?: boolean; c
         sx={{ width: 30, height: 30, flexShrink: 0 }}
         aria-hidden
       >
-        <rect width="64" height="64" rx="14" fill="#0B1F2A" />
-        <path d="M12 24 q10 -8 20 0 t20 0" fill="none" stroke="#2FB8A6" strokeWidth="4" strokeLinecap="round" />
-        <path d="M12 34 q10 -8 20 0 t20 0" fill="none" stroke="#0C8B7B" strokeWidth="4" strokeLinecap="round" />
-        <path d="M12 44 q10 -8 20 0 t20 0" fill="none" stroke="#15705F" strokeWidth="4" strokeLinecap="round" />
+        <rect width="64" height="64" rx="9" fill="#0B1F2A" />
+        {/* chilli stem */}
+        <path d="M41 20 C 39 13, 32 11, 27 16" fill="none" stroke="#3FA34D" strokeWidth="4.5" strokeLinecap="round" />
+        {/* chilli body */}
+        <path
+          d="M41 20 C 50 27, 48 43, 34 49 C 24 53, 15 49, 17 41 C 22 46, 31 45, 35 36 C 38 29, 36 23, 41 20 Z"
+          fill="#E5392A"
+        />
+        {/* highlight */}
+        <path d="M40 24 C 44 29, 43 38, 36 43" fill="none" stroke="#FF7A6B" strokeWidth="2" strokeLinecap="round" opacity="0.8" />
       </Box>
       {!compact && (
         <Box sx={{ lineHeight: 1 }}>

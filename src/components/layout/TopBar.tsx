@@ -1,4 +1,4 @@
-import { AppBar, Box, Chip, IconButton, Toolbar, Tooltip } from '@mui/material';
+import { AppBar, Box, IconButton, Toolbar, Tooltip } from '@mui/material';
 import MenuRoundedIcon from '@mui/icons-material/MenuRounded';
 import LightModeRoundedIcon from '@mui/icons-material/LightModeRounded';
 import DarkModeRoundedIcon from '@mui/icons-material/DarkModeRounded';
@@ -6,12 +6,10 @@ import { BrandMark } from './BrandMark';
 import { PersonaSwitcher } from './PersonaSwitcher';
 import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
 import { toggleSidebar, toggleTheme } from '@/app/store/uiSlice';
-import { useDataSource } from '@/hooks/useDataSource';
 
 export function TopBar() {
   const dispatch = useAppDispatch();
   const themeMode = useAppSelector((s) => s.ui.themeMode);
-  const ds = useDataSource();
 
   return (
     <AppBar
@@ -32,16 +30,6 @@ export function TopBar() {
         <BrandMark />
 
         <Box sx={{ flexGrow: 1 }} />
-
-        <Tooltip title={`Data source: ${ds.label}`}>
-          <Chip
-            size="small"
-            label={ds.id === 'mock' ? 'Mock data' : 'Live API'}
-            sx={{ display: { xs: 'none', sm: 'flex' }, fontWeight: 600 }}
-            color={ds.id === 'mock' ? 'default' : 'primary'}
-            variant="outlined"
-          />
-        </Tooltip>
 
         <Box
           sx={{

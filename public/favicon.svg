@@ -1,7 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#0B1F2A" />
-  <!-- wind / wave currents -->
-  <path d="M12 24 q10 -8 20 0 t20 0" fill="none" stroke="#2FB8A6" stroke-width="4" stroke-linecap="round" />
-  <path d="M12 34 q10 -8 20 0 t20 0" fill="none" stroke="#0C8B7B" stroke-width="4" stroke-linecap="round" />
-  <path d="M12 44 q10 -8 20 0 t20 0" fill="none" stroke="#15705F" stroke-width="4" stroke-linecap="round" />
+  <rect width="64" height="64" rx="9" fill="#0B1F2A" />
+  <!-- chilli stem -->
+  <path d="M41 20 C 39 13, 32 11, 27 16" fill="none" stroke="#3FA34D" stroke-width="4.5" stroke-linecap="round" />
+  <!-- chilli body -->
+  <path d="M41 20 C 50 27, 48 43, 34 49 C 24 53, 15 49, 17 41 C 22 46, 31 45, 35 36 C 38 29, 36 23, 41 20 Z" fill="#E5392A" />
+  <!-- highlight -->
+  <path d="M40 24 C 44 29, 43 38, 36 43" fill="none" stroke="#FF7A6B" stroke-width="2" stroke-linecap="round" opacity="0.8" />
 </svg>

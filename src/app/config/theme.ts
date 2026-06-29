@@ -26,7 +26,7 @@ export const brandTokens = {
   high: '#C0392B',
   med: '#C8841B',
   low: '#2E8B6F',
-  radius: 13,
+  radius: 6,
   fontFamily: '"Montserrat", system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif',
 } as const;
 
