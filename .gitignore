@@ -9,3 +9,6 @@ dist-ssr
 *.log
 .vite
 .vercel
+
+# TypeScript build info
+*.tsbuildinfo
