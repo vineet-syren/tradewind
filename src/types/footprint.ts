@@ -32,6 +32,8 @@ export interface Footprint {
   airExceptionCount: number;
   airAvoidableCount: number;
   airCo2eTonnes: number;
+  /** Shipments currently in transit or planned (2026 live decisioning). */
+  liveShipmentCount: number;
   topLanes: Lane[];
   /** Share of CO₂e from the top-5 customers (concentration). */
   top5CustomerSharePct: number;

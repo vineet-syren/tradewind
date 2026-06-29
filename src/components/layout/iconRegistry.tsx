@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react';
 import SpaceDashboardRoundedIcon from '@mui/icons-material/SpaceDashboardRounded';
+import AutoAwesomeRoundedIcon from '@mui/icons-material/AutoAwesomeRounded';
 import LocalFireDepartmentRoundedIcon from '@mui/icons-material/LocalFireDepartmentRounded';
 import AltRouteRoundedIcon from '@mui/icons-material/AltRouteRounded';
 import GridViewRoundedIcon from '@mui/icons-material/GridViewRounded';
@@ -19,6 +20,7 @@ import type { SvgIconProps } from '@mui/material/SvgIcon';
 
 const REGISTRY: Record<string, (p: SvgIconProps) => ReactElement> = {
   command: (p) => <SpaceDashboardRoundedIcon {...p} />,
+  copilot: (p) => <AutoAwesomeRoundedIcon {...p} />,
   hotspots: (p) => <LocalFireDepartmentRoundedIcon {...p} />,
   decisioning: (p) => <AltRouteRoundedIcon {...p} />,
   lanes: (p) => <GridViewRoundedIcon {...p} />,

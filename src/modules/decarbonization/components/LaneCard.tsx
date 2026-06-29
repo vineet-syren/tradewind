@@ -6,9 +6,18 @@ import { ModeIcon } from '@/components/layout/iconRegistry';
 import { ApproachChip } from '@/components/shared/Chips';
 import { formatTonnes } from '@/utils/format';
 
-export function LaneCard({ lane, onClick }: { lane: Lane; onClick?: () => void }) {
+export function LaneCard({ lane, onClick, selected = false }: { lane: Lane; onClick?: () => void; selected?: boolean }) {
   return (
-    <Card sx={{ cursor: onClick ? 'pointer' : 'default', height: '100%' }} onClick={onClick}>
+    <Card
+      onClick={onClick}
+      sx={{
+        cursor: onClick ? 'pointer' : 'default',
+        height: '100%',
+        borderColor: selected ? 'primary.main' : undefined,
+        borderWidth: selected ? 2 : 1,
+        borderStyle: 'solid',
+      }}
+    >
       <CardContent>
         <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
           <Box sx={{ minWidth: 0 }}>

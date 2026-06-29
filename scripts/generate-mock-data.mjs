@@ -29,9 +29,10 @@ const OUT = join(__dirname, '..', 'public', 'mock-data');
 // Frozen "as of" so the generated dataset is stable & demo-friendly. The
 // historical shipment window is Jan 2022 → Dec 2024 (mirrors the customer's
 // 2020-2022 / 2021-2023 / 2022-2024 workbook tabs).
-const AS_OF = new Date('2025-01-08T00:00:00Z');
+const AS_OF = new Date('2026-06-30T00:00:00Z');
+const AS_OF_PERIOD = '2026-06';
 const BASELINE_YEAR = 2022;
-const LATEST_YEAR = 2024;
+const LATEST_YEAR = 2026;
 const REDUCTION_AMBITION = 0.15; // 10–20% medium-term ambition (mid-point)
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 3600 * 1000;
@@ -195,6 +196,12 @@ function legFuelLitres(mode, km, weightTonnes) {
   return weightTonnes * km * (FUEL_RATE[mode] ?? 0.02);
 }
 
+// Per-vehicle payload capacity (tonnes) → how many vehicles fill one shipment leg.
+const VEHICLE_CAPACITY = { road: 12, rail: 55, ocean: 26, air: 90 };
+function legVehicleCount(mode, weightTonnes) {
+  return Math.max(1, Math.ceil(weightTonnes / (VEHICLE_CAPACITY[mode] ?? 20)));
+}
+
 const MODE_LABEL = { road: 'Road', rail: 'Rail', ocean: 'Ocean', air: 'Air' };
 
 // ── Domain pools ────────────────────────────────────────────────────────────
@@ -276,18 +283,28 @@ const NEAREST_PORT_BY_ORIGIN = {
 
 const MONTHS = [];
 for (let y = BASELINE_YEAR; y <= LATEST_YEAR; y++)
-  for (let m = 1; m <= 12; m++) MONTHS.push(`${y}-${String(m).padStart(2, '0')}`);
+  for (let m = 1; m <= 12; m++) {
+    const p = `${y}-${String(m).padStart(2, '0')}`;
+    if (p <= AS_OF_PERIOD) MONTHS.push(p); // no future months beyond "today"
+  }
 
 // Reduction program ramp: realized % reduction applied to a lane in a month.
-// Pilot starts 2023-07; ramps from ~2% to ~7% by end-2024 (the "structured
-// reduction journey" the customer asked for — not a month-one promise).
+// Pilot starts 2023-07; ramps from ~2% toward ~14% by mid-2026 (the structured
+// reduction journey toward the 10–20% ambition — not a month-one promise).
 function realizedReductionPct(period) {
   const [y, m] = period.split('-').map(Number);
   const idx = (y - BASELINE_YEAR) * 12 + (m - 1);
   const pilotStart = (2023 - BASELINE_YEAR) * 12 + 6; // 2023-07
   if (idx < pilotStart) return 0;
-  const ramp = (idx - pilotStart) / 17; // → 1.0 by 2024-12
-  return clamp(0.02 + ramp * 0.05, 0, 0.075);
+  const ramp = (idx - pilotStart) / 35; // → 1.0 by 2026-06
+  return clamp(0.02 + ramp * 0.12, 0, 0.14);
+}
+
+// Live status from the shipment's month relative to "today" (2026-06).
+function shipmentStatus(period) {
+  if (period === AS_OF_PERIOD) return 'Planned';
+  if (period === '2026-05' || period === '2026-04') return 'In transit';
+  return 'Delivered';
 }
 
 // ── Leg + scenario construction ─────────────────────────────────────────────
@@ -315,6 +332,9 @@ function makeLeg(seq, mode, fromName, toName, weightTonnes, opts = {}) {
     co2eTonnes: round(co2e, 3),
     fuelLitres: round(legFuelLitres(mode, km, weightTonnes), 1),
     fuelType: FUEL_TYPE[mode] ?? 'Diesel',
+    vehicleCount: legVehicleCount(mode, weightTonnes),
+    transitDaysExpected: legDays(mode, km),
+    transitDaysActual: round(legDays(mode, km) * rand(1.0, 1.18), 1),
   };
 }
 
@@ -407,10 +427,10 @@ function buildScenarios(base) {
       : 'The lane as currently executed by the vendor/LSP.',
   });
   const optimal = mk('optimal', optimalLegs, {
-    label: 'Optimal (fastest)',
+    label: 'Fastest',
     dwell: 1,
     costMult: 1.0,
-    tagline: 'Multimodal / air-heavy — fastest, highest CO₂',
+    tagline: 'Multimodal / air-heavy — fastest, but highest CO₂ & cost',
     transitBand: '3–5 days',
     slaRisk: 'Lowest',
     feasibility: 'For urgent / replenishment only',
@@ -520,6 +540,7 @@ function buildShipment() {
     shipmentId,
     period,
     year,
+    status: shipmentStatus(period),
     productSku: product.sku,
     productName: product.name,
     category: product.category,
@@ -1002,8 +1023,21 @@ function buildEvidence(shipments) {
 }
 
 // ── Pulse: "what changed" feed ──────────────────────────────────────────────
-function buildPulse(lanes, recs) {
+function buildPulse(lanes, recs, shipments) {
   const out = [];
+
+  // Live (2026) shipments needing a decision now — the "live decisioning" hook.
+  const live = (shipments ?? []).filter((s) => s.status === 'In transit' || s.status === 'Planned');
+  const planned = live.filter((s) => s.status === 'Planned');
+  const inTransit = live.filter((s) => s.status === 'In transit');
+  if (planned.length)
+    out.push({ id: 'pulse-live-1', kind: 'live', region: 'All', intent: 'opportunity', summary: `${planned.length} shipments are being planned for this month — choose the mode before booking to lock in CO₂e savings.`, timestamp: tsHoursAgo(randInt(2, 10)) });
+  if (inTransit.length)
+    out.push({ id: 'pulse-live-2', kind: 'live', region: 'All', intent: 'neutral', summary: `${inTransit.length} shipments are in transit now — tracking actual vs expected transit and emissions.`, timestamp: tsHoursAgo(randInt(3, 14)) });
+  for (const s of planned.slice(0, 4)) {
+    out.push({ id: `pulse-live-${s.shipmentId}`, kind: 'live', laneId: s.laneId, region: s.region, intent: s.airException ? 'risk' : 'opportunity', summary: `Planned: ${s.customer} ${s.category} (${s.origin}→${s.destPort})${s.airException ? ' is set to fly — switch to ocean to cut CO₂e' : ' — confirm Best-for-CO₂ routing'}.`, timestamp: tsHoursAgo(randInt(1, 18)) });
+  }
+
   const topLanes = lanes.slice(0, 14);
   const kinds = [
     (l) => ({ kind: 'recommendation', summary: `New reduction play on ${l.label} — up to ${l.reductionPotentialTonnes} t CO₂e/yr available.`, intent: 'opportunity' }),
@@ -1118,7 +1152,7 @@ function stripShipment(s) {
   return { ...rest, co2eGrossTonnes };
 }
 
-const SHIPMENT_COUNT = 320;
+const SHIPMENT_COUNT = 380;
 
 function main() {
   rmSync(OUT, { recursive: true, force: true });
@@ -1184,7 +1218,7 @@ function main() {
   writeJson('hotspots.json', buildHotspots(shipments));
   writeJson('partners.json', buildPartners(shipments, recs));
   writeJson('evidence.json', buildEvidence(shipments));
-  writeJson('pulse.json', buildPulse(lanes, recs));
+  writeJson('pulse.json', buildPulse(lanes, recs, shipments));
   writeJson('exceptions.json', buildExceptions(shipments, lanes));
   writeJson('emission-factors.json', EMISSION_FACTORS);
   writeJson('copilot-suggestions.json', COPILOT_SUGGESTIONS);

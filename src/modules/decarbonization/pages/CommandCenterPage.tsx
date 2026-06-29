@@ -102,7 +102,7 @@ export default function CommandCenterPage() {
   return (
     <Box>
       <PageHeader
-        overline={`Command Center · ${p.name}`}
+        overline={`Carbon Copilot · ${p.name}`}
         title="Steer every shipment to its lowest-carbon lane"
         subtitle={p.lens}
         actions={<ScopeNote />}

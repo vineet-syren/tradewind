@@ -21,6 +21,9 @@ export interface Leg {
   co2eTonnes: number;
   fuelLitres: number;
   fuelType: string;
+  vehicleCount: number;
+  transitDaysExpected: number;
+  transitDaysActual: number;
 }
 
 /** Lightweight shipment fact (the index row). */
@@ -29,6 +32,7 @@ export interface Shipment {
   laneId: string;
   period: string; // YYYY-MM
   year: number;
+  status: 'Delivered' | 'In transit' | 'Planned';
   productSku: string;
   productName: string;
   category: string;

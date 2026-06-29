@@ -42,6 +42,12 @@ export function ShipmentDetailContent({ shipmentId, onToast }: { shipmentId: str
           {s.origin} → {s.destCity}
         </Typography>
         <Stack direction="row" spacing={1} sx={{ mt: 1 }} flexWrap="wrap" useFlexGap>
+          <Chip
+            size="small"
+            color={s.status === 'Planned' ? 'primary' : s.status === 'In transit' ? 'warning' : 'default'}
+            variant={s.status === 'Delivered' ? 'outlined' : 'filled'}
+            label={s.status}
+          />
           <ModeChip mode={s.primaryMode} />
           {s.airException && <SeverityChip severity={s.airAvoidable ? 'High' : 'Medium'} />}
           {s.airException && <Chip size="small" variant="outlined" label={s.airAvoidable ? 'Air · avoidable' : 'Air · justified'} />}

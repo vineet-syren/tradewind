@@ -20,10 +20,10 @@ export function buildFocusKpis(persona: PersonaId, ctx: FocusCtx): KpiMetric[] {
   switch (persona) {
     case 'logistics':
       return [
+        { id: 'live', label: 'Live shipments', value: f.liveShipmentCount, unit: 'number', intent: f.liveShipmentCount ? 'opportunity' : 'neutral', hint: 'in transit / planned — decide now' },
         { id: 'top-lane', label: 'Top lane opportunity', value: f.topLanes[0]?.realizableReductionTonnes ?? 0, unit: 'tonnes', display: tonnes(f.topLanes[0]?.realizableReductionTonnes ?? 0) + '/yr', intent: 'opportunity', hint: f.topLanes[0]?.label ?? '—' },
         { id: 'air', label: 'Air exceptions', value: f.airExceptionCount, unit: 'number', intent: f.airExceptionCount ? 'negative' : 'positive', hint: `${f.airAvoidableCount} avoidable` },
         { id: 'ocean', label: 'Ocean-led share', value: ocean?.pct ?? 0, unit: 'percent', intent: 'positive', hint: 'of CO₂e' },
-        { id: 'actions', label: 'Open lane actions', value: recs.length, unit: 'number', intent: 'neutral', hint: 'in the tracker' },
       ];
     case 'procurement':
       return [

@@ -1,5 +1,5 @@
 /** App-wide constants. APP_TODAY mirrors the generator's frozen as-of date. */
-export const APP_TODAY = '2025-01-08';
+export const APP_TODAY = '2026-06-30';
 
 export const APP_META = {
   name: 'Tradewind',
@@ -26,7 +26,7 @@ export const APPROACH_COLORS: Record<string, string> = {
 
 export const APPROACH_LABEL: Record<string, string> = {
   current: 'Current',
-  optimal: 'Optimal',
+  optimal: 'Fastest',
   balanced: 'Balanced',
   best_co2: 'Best for CO₂',
 };

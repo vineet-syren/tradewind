@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Box, Card, CardContent, Snackbar, Stack, Tab, Tabs, Typography } from '@mui/material';
+import { Box, Card, CardContent, MenuItem, Snackbar, Stack, Tab, Tabs, TextField, Typography } from '@mui/material';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ScopeNote } from '@/components/layout/ScopeNote';
 import { FilterPanel } from '@/components/filters/FilterPanel';
@@ -16,9 +16,16 @@ import { useAsync } from '@/hooks/useAsync';
 import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
 import { adoptDecision } from '@/app/store/actionsSlice';
 import { setSelectedLane } from '@/app/store/uiSlice';
-import type { ApproachKind, LaneDetail, Scenario } from '@/types';
+import type { ApproachKind, Lane, LaneDetail, Scenario } from '@/types';
 
-const MAP_LANE_COUNT = 28;
+const ROUTE_COUNTS = [5, 8, 12, 16];
+type ListSortKey = 'reduction' | 'co2e' | 'shipments' | 'pct';
+const LIST_SORTS: { key: ListSortKey; label: string; value: (l: Lane) => number }[] = [
+  { key: 'reduction', label: 'Reduction potential', value: (l) => l.realizableReductionTonnes },
+  { key: 'co2e', label: 'Total CO₂e', value: (l) => l.totalCo2eTonnes },
+  { key: 'shipments', label: 'Shipment volume', value: (l) => l.shipmentCount },
+  { key: 'pct', label: 'Reduction %', value: (l) => l.reductionPotentialPct },
+];
 
 export default function RouteModeDecisioningPage() {
   const ds = useDataSource();
@@ -28,12 +35,18 @@ export default function RouteModeDecisioningPage() {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [routeCount, setRouteCount] = useState(8);
+  const [listSort, setListSort] = useState<ListSortKey>('reduction');
 
-  const mapLanes = useMemo(() => lanes?.slice(0, MAP_LANE_COUNT) ?? [], [lanes]);
-  const listLanes = useMemo(() => lanes?.slice(0, 16) ?? [], [lanes]);
+  // Top N most-impactful lanes on the map (kept small so it reads cleanly).
+  const mapLanes = useMemo(() => lanes?.slice(0, routeCount) ?? [], [lanes, routeCount]);
+  const listLanes = useMemo(() => {
+    const fn = LIST_SORTS.find((s) => s.key === listSort)!.value;
+    return [...(lanes ?? [])].sort((a, b) => fn(b) - fn(a)).slice(0, 24);
+  }, [lanes, listSort]);
 
   // Clear the selection only if it falls out of the filtered set — default to
-  // the grouped "all routes" view so the user sees every shipment lane first.
+  // the grouped view so the user sees the top shipment lanes first.
   useEffect(() => {
     if (selectedId && lanes && !lanes.find((l) => l.laneId === selectedId)) setSelectedId(null);
   }, [lanes, selectedId]);
@@ -43,14 +56,36 @@ export default function RouteModeDecisioningPage() {
       <PageHeader
         overline="Visibility · End-to-end routes"
         title="Shipment Route Map"
-        subtitle="Trace every shipment end to end — route, mode, CO₂e, distance and fuel. Select a lane to isolate its route and compare the Optimal, Balanced and Best-for-CO₂ options."
+        subtitle="Trace every shipment end to end — route, mode, CO₂e, distance and fuel. Select a lane to isolate its route and compare the Fastest, Balanced and Best-for-CO₂ options."
         actions={<ScopeNote />}
       />
       <FilterPanel />
 
       <ChartContainer
         title="Outbound shipment network"
-        subtitle={selectedId ? 'Tracing the selected shipment route' : `${mapLanes.length} shipment lanes · click one to trace its full route`}
+        subtitle={
+          selectedId
+            ? 'Tracing the selected shipment route'
+            : `Showing the top ${mapLanes.length} of ${lanes?.length ?? 0} lanes · click one to trace its full route`
+        }
+        action={
+          !selectedId && lanes ? (
+            <TextField
+              select
+              size="small"
+              label="Routes shown"
+              value={routeCount}
+              onChange={(e) => setRouteCount(Number(e.target.value))}
+              sx={{ width: 150 }}
+            >
+              {ROUTE_COUNTS.map((n) => (
+                <MenuItem key={n} value={n}>
+                  Top {n} lanes
+                </MenuItem>
+              ))}
+            </TextField>
+          ) : undefined
+        }
       >
         {status === 'loading' ? (
           <ChartSkeleton height={420} />
@@ -61,17 +96,31 @@ export default function RouteModeDecisioningPage() {
 
       <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', lg: '1fr 1.55fr' }, mt: 3 }}>
         <Box>
-          <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>
-            Lanes by reduction potential
-          </Typography>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+              Lanes ranked
+            </Typography>
+            <TextField
+              select
+              size="small"
+              label="Sort by"
+              value={listSort}
+              onChange={(e) => setListSort(e.target.value as ListSortKey)}
+              sx={{ width: 180 }}
+            >
+              {LIST_SORTS.map((s) => (
+                <MenuItem key={s.key} value={s.key}>
+                  {s.label}
+                </MenuItem>
+              ))}
+            </TextField>
+          </Stack>
           {status === 'loading' ? (
             <TableSkeleton rows={6} />
           ) : (
-            <Stack spacing={1.5} sx={{ maxHeight: 720, overflowY: 'auto', pr: 0.5 }}>
+            <Stack spacing={1.5} sx={{ maxHeight: 760, overflowY: 'auto', px: 0.5, py: 0.5 }}>
               {listLanes.map((l) => (
-                <Box key={l.laneId} sx={{ outline: l.laneId === selectedId ? '2px solid' : 'none', outlineColor: 'primary.main', borderRadius: 4 }}>
-                  <LaneCard lane={l} onClick={() => setSelectedId(l.laneId)} />
-                </Box>
+                <LaneCard key={l.laneId} lane={l} selected={l.laneId === selectedId} onClick={() => setSelectedId(l.laneId)} />
               ))}
             </Stack>
           )}
@@ -83,7 +132,7 @@ export default function RouteModeDecisioningPage() {
           ) : (
             <Card>
               <CardContent>
-                <EmptyState title="Select a lane" description="Pick a lane on the map or list to compare its Optimal, Balanced and Best-for-CO₂ paths." />
+                <EmptyState title="Select a lane" description="Pick a lane on the map or the ranked list to compare its Fastest, Balanced and Best-for-CO₂ paths." />
               </CardContent>
             </Card>
           )}

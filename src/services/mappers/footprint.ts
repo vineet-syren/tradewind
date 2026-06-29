@@ -27,9 +27,10 @@ export function buildFootprint(
 ): Footprint {
   const totalCo2eTonnes = shipments.reduce((s, x) => s + x.co2eTonnes, 0);
   const totalWeightTonnes = shipments.reduce((s, x) => s + x.weightTonnes, 0);
-  const years = new Set(shipments.map((s) => s.year));
-  const yearSpan = Math.max(1, years.size);
-  const annualCo2eTonnes = totalCo2eTonnes / yearSpan;
+  // Annualize by the actual month span (handles partial latest year correctly).
+  const months = new Set(shipments.map((s) => s.period));
+  const yearsCovered = Math.max(1, months.size / 12);
+  const annualCo2eTonnes = totalCo2eTonnes / yearsCovered;
 
   // Mode split by the shipment's primary mode (Ocean-led vs Air exception).
   const modeAgg = new Map<ModeLabel, { co2e: number; ships: number }>();
@@ -90,6 +91,7 @@ export function buildFootprint(
     airExceptionCount: airShipments.length,
     airAvoidableCount: airShipments.filter((s) => s.airAvoidable === true).length,
     airCo2eTonnes: round(airShipments.reduce((s, x) => s + x.co2eTonnes, 0), 2),
+    liveShipmentCount: shipments.filter((s) => s.status === 'In transit' || s.status === 'Planned').length,
     topLanes: [...scopedLanes].sort((a, b) => b.realizableReductionTonnes - a.realizableReductionTonnes).slice(0, 6),
     top5CustomerSharePct,
   };

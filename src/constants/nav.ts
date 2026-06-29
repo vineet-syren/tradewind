@@ -12,9 +12,12 @@ export interface NavGroupDef {
 
 export const NAV_GROUPS: NavGroupDef[] = [
   {
+    heading: '',
+    items: [{ label: 'Carbon Copilot', to: '/', iconKey: 'copilot' }],
+  },
+  {
     heading: 'VISIBILITY',
     items: [
-      { label: 'Command Center', to: '/', iconKey: 'command' },
       { label: 'Shipment Route Map', to: '/decisioning', iconKey: 'decisioning' },
       { label: 'Emission Hotspots', to: '/hotspots', iconKey: 'hotspots' },
       { label: 'Customer & Product Lanes', to: '/lanes', iconKey: 'lanes' },
