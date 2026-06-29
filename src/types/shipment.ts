@@ -19,6 +19,8 @@ export interface Leg {
   vehicleType: string;
   weightTonnes: number;
   co2eTonnes: number;
+  fuelLitres: number;
+  fuelType: string;
 }
 
 /** Lightweight shipment fact (the index row). */

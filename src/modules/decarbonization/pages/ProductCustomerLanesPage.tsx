@@ -36,8 +36,8 @@ export default function ProductCustomerLanesPage() {
   return (
     <Box>
       <PageHeader
-        overline="Intelligence · Commercial + Supply Chain"
-        title="Product–Customer Lanes"
+        overline="Visibility · Commercial + Supply Chain"
+        title="Customer & Product Lanes"
         subtitle="Emissions by product category, customer, market and shipment count — to prioritize the customer-product lanes worth a reduction conversation."
         actions={<ScopeNote />}
       />

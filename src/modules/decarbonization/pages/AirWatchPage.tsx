@@ -48,8 +48,8 @@ export default function AirWatchPage() {
   return (
     <Box>
       <PageHeader
-        overline="Act · Mode Governance Agent"
-        title="Air Watch & Exceptions"
+        overline="Reduce · Mode Governance Agent"
+        title="Air Freight Watch"
         subtitle="Govern the carbon-heavy air movements and the data gaps. Classify air as avoidable or justified, shift what you can to ocean, and document the rest."
         actions={<ScopeNote />}
       />

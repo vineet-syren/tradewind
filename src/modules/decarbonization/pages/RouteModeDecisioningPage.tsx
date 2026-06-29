@@ -32,28 +32,30 @@ export default function RouteModeDecisioningPage() {
   const mapLanes = useMemo(() => lanes?.slice(0, MAP_LANE_COUNT) ?? [], [lanes]);
   const listLanes = useMemo(() => lanes?.slice(0, 16) ?? [], [lanes]);
 
+  // Clear the selection only if it falls out of the filtered set — default to
+  // the grouped "all routes" view so the user sees every shipment lane first.
   useEffect(() => {
-    if (lanes?.length && !lanes.find((l) => l.laneId === selectedId)) setSelectedId(lanes[0].laneId);
+    if (selectedId && lanes && !lanes.find((l) => l.laneId === selectedId)) setSelectedId(null);
   }, [lanes, selectedId]);
 
   return (
     <Box>
       <PageHeader
-        overline="Intelligence · Route & Mode Agent"
-        title="Route & Mode Decisioning"
-        subtitle="Balance CO₂e, cost and transit time across every lane. Analyze modes → compare trade-offs → select the best fit: Optimal, Balanced, or Best for CO₂."
+        overline="Visibility · End-to-end routes"
+        title="Shipment Route Map"
+        subtitle="Trace every shipment end to end — route, mode, CO₂e, distance and fuel. Select a lane to isolate its route and compare the Optimal, Balanced and Best-for-CO₂ options."
         actions={<ScopeNote />}
       />
       <FilterPanel />
 
       <ChartContainer
         title="Outbound shipment network"
-        subtitle={`${mapLanes.length} highest-potential lanes · India origins → world ports`}
+        subtitle={selectedId ? 'Tracing the selected shipment route' : `${mapLanes.length} shipment lanes · click one to trace its full route`}
       >
         {status === 'loading' ? (
           <ChartSkeleton height={420} />
         ) : (
-          <WorldMap lanes={mapLanes} selectedLaneId={selectedId} onSelectLane={setSelectedId} height={440} />
+          <WorldMap lanes={mapLanes} selectedLaneId={selectedId} onSelectLane={setSelectedId} onClear={() => setSelectedId(null)} height={460} />
         )}
       </ChartContainer>
 

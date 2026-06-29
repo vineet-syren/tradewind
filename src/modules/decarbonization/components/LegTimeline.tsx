@@ -3,7 +3,7 @@ import { alpha } from '@mui/material/styles';
 import type { Leg } from '@/types';
 import { MODE_COLORS } from '@/constants/app';
 import { ModeIcon } from '@/components/layout/iconRegistry';
-import { formatDistance, formatTonnes } from '@/utils/format';
+import { formatDistance, formatLitres, formatTonnes } from '@/utils/format';
 
 /** Leg-by-leg journey with the full CO₂e calculation made transparent. */
 export function LegTimeline({ legs, showCalc = true }: { legs: Leg[]; showCalc?: boolean }) {
@@ -44,7 +44,7 @@ export function LegTimeline({ legs, showCalc = true }: { legs: Leg[]; showCalc?:
                 </Typography>
               </Stack>
               <Typography variant="caption" color="text.secondary">
-                {leg.modeLabel} · {leg.vehicleType} · {formatDistance(leg.distanceKm)} ({leg.distanceTier})
+                {leg.modeLabel} · {leg.vehicleType} · {formatDistance(leg.distanceKm)} · {formatLitres(leg.fuelLitres)} {leg.fuelType}
               </Typography>
               {showCalc && (
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontFamily: 'monospace', fontSize: 10.5, mt: 0.25 }}>

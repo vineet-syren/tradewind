@@ -33,8 +33,8 @@ export default function HotspotsPage() {
   return (
     <Box>
       <PageHeader
-        overline="Intelligence · Footprint & Hotspot Agent"
-        title="Baseline & Hotspots"
+        overline="Visibility · Footprint & Hotspot Agent"
+        title="Emission Hotspots"
         subtitle="Where the downstream transportation emissions concentrate — by product, customer, lane, port, mode, vendor and logistics provider. Act on the biggest first."
         actions={<ScopeNote />}
       />

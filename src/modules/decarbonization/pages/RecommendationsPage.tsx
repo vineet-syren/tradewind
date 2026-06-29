@@ -62,8 +62,8 @@ export default function RecommendationsPage() {
   return (
     <Box>
       <PageHeader
-        overline="Act · Reduction Engine"
-        title="Recommendations"
+        overline="Reduce · Reduction Engine"
+        title="Reduction Opportunities"
         subtitle="Every reduction action across route, mode, port, consolidation, air avoidance and partner governance — ranked by CO₂e saving × confidence."
         actions={<ScopeNote />}
       />

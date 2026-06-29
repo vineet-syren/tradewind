@@ -51,8 +51,8 @@ export default function PartnerInfluencePage() {
   return (
     <Box>
       <PageHeader
-        overline="Intelligence · Partner Influence Agent"
-        title="Partner Influence"
+        overline="Visibility · Partner Influence Agent"
+        title="Carrier & Vendor Performance"
         subtitle="Terova outsources execution, so part of the reduction sits with vendors, processors and logistics providers. Map their contribution and the saving Terova can influence."
         actions={<ScopeNote />}
       />

@@ -47,7 +47,7 @@ export function LaneDetailContent({ laneId, onToast }: { laneId: string; onToast
     <Stack spacing={2.5}>
       <Box>
         <Typography variant="overline" color="primary.main">
-          Lane 360 · Route &amp; Mode Decisioning
+          Lane 360 · Shipment route &amp; decisions
         </Typography>
         <Typography variant="h5" sx={{ fontWeight: 700, lineHeight: 1.2 }}>
           {lane.origin} → {lane.destPort}

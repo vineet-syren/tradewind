@@ -117,8 +117,8 @@ export default function ActionCenterPage() {
   return (
     <Box>
       <PageHeader
-        overline="Act · Recommendation Tracker"
-        title="Action Center"
+        overline="Reduce · Recommendation Tracker"
+        title="Action Tracker"
         subtitle="Prioritized reduction actions that need a decision, a partner nudge, or execution — each with estimated CO₂e saving, cost and SLA impact, and a full audit trail."
         actions={<ScopeNote />}
       />

@@ -49,6 +49,53 @@ body,
   }
 }
 .tw-route-animated {
-  stroke-dasharray: 4 6;
-  animation: tw-dash 1.4s linear infinite;
+  stroke-dasharray: 3 9;
+  animation: tw-dash 1.1s linear infinite;
+}
+
+/* Pseudo-3D depth for route lines and map icons. */
+.tw-route-glow {
+  filter: drop-shadow(0 2px 2px rgba(11, 31, 42, 0.35));
+}
+.tw-pin svg {
+  filter: drop-shadow(0 3px 3px rgba(11, 31, 42, 0.4));
+}
+.tw-badge {
+  box-shadow:
+    0 2px 5px rgba(11, 31, 42, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+/* Status / metric chip tooltips on the map. */
+.leaflet-tooltip.tw-chip {
+  background: rgba(255, 255, 255, 0.97);
+  border: none;
+  border-radius: 8px;
+  box-shadow: 0 3px 10px rgba(11, 31, 42, 0.28);
+  padding: 4px 9px;
+  font-weight: 600;
+  color: #0b1f2a;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+.leaflet-tooltip.tw-chip::before {
+  display: none;
+}
+.leaflet-tooltip.tw-place {
+  background: #0b1f2a;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.35);
+  padding: 2px 8px;
+  font-weight: 700;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.leaflet-tooltip.tw-place::before {
+  display: none;
+}
+.leaflet-container .leaflet-control-zoom a {
+  border-radius: 6px;
 }

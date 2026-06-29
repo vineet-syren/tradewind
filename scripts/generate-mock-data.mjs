@@ -187,6 +187,14 @@ function legCostUsd(mode, km, weightTonnes) {
   return Math.round(base + weightTonnes * km * perTkm);
 }
 
+// Fuel consumed/projected per leg — litres, attributed by weight share.
+// Litres per tonne-km by mode (illustrative; ships are efficient per t-km, air burns the most).
+const FUEL_RATE = { road: 0.022, rail: 0.005, ocean: 0.0025, air: 0.2 };
+const FUEL_TYPE = { road: 'Diesel', rail: 'Diesel', ocean: 'Marine fuel oil', air: 'Jet A-1' };
+function legFuelLitres(mode, km, weightTonnes) {
+  return weightTonnes * km * (FUEL_RATE[mode] ?? 0.02);
+}
+
 const MODE_LABEL = { road: 'Road', rail: 'Rail', ocean: 'Ocean', air: 'Air' };
 
 // ── Domain pools ────────────────────────────────────────────────────────────
@@ -305,6 +313,8 @@ function makeLeg(seq, mode, fromName, toName, weightTonnes, opts = {}) {
     vehicleType: opts.vehicleType ?? (mode === 'road' ? 'Full-load diesel truck' : mode === 'ocean' ? 'Container vessel' : mode === 'rail' ? 'Freight rail' : 'Air freighter'),
     weightTonnes: round(weightTonnes, 3),
     co2eTonnes: round(co2e, 3),
+    fuelLitres: round(legFuelLitres(mode, km, weightTonnes), 1),
+    fuelType: FUEL_TYPE[mode] ?? 'Diesel',
   };
 }
 

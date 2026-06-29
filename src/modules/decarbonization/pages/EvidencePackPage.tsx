@@ -29,8 +29,8 @@ export default function EvidencePackPage() {
   return (
     <Box>
       <PageHeader
-        overline="Act · Evidence & Reporting Agent"
-        title="ESG Evidence Pack"
+        overline="Report · Evidence & Reporting Agent"
+        title="ESG Reporting"
         subtitle="Report-ready, methodology-backed evidence of downstream-transport reduction for ESG and annual-report communication — baseline, realized reductions and the path to the ambition."
         actions={
           <Button variant="contained" startIcon={<DownloadRoundedIcon />} onClick={() => setToast('Evidence pack exported (mock) — PDF/CSV would download here')}>

@@ -12,26 +12,26 @@ export interface NavGroupDef {
 
 export const NAV_GROUPS: NavGroupDef[] = [
   {
-    heading: 'DECARBONIZE',
-    items: [{ label: 'Command Center', to: '/', iconKey: 'command' }],
-  },
-  {
-    heading: 'INTELLIGENCE',
+    heading: 'VISIBILITY',
     items: [
-      { label: 'Baseline & Hotspots', to: '/hotspots', iconKey: 'hotspots' },
-      { label: 'Route & Mode Decisioning', to: '/decisioning', iconKey: 'decisioning' },
-      { label: 'Product–Customer Lanes', to: '/lanes', iconKey: 'lanes' },
-      { label: 'Partner Influence', to: '/partners', iconKey: 'partners' },
+      { label: 'Command Center', to: '/', iconKey: 'command' },
+      { label: 'Shipment Route Map', to: '/decisioning', iconKey: 'decisioning' },
+      { label: 'Emission Hotspots', to: '/hotspots', iconKey: 'hotspots' },
+      { label: 'Customer & Product Lanes', to: '/lanes', iconKey: 'lanes' },
+      { label: 'Carrier & Vendor Performance', to: '/partners', iconKey: 'partners' },
     ],
   },
   {
-    heading: 'CONCIERGE',
+    heading: 'REDUCE',
     items: [
-      { label: 'Action Center', to: '/actions', iconKey: 'actions' },
-      { label: 'Recommendations', to: '/recommendations', iconKey: 'recommendations' },
-      { label: 'Air Watch & Exceptions', to: '/air-watch', iconKey: 'air' },
-      { label: 'ESG Evidence Pack', to: '/evidence', iconKey: 'evidence' },
+      { label: 'Reduction Opportunities', to: '/recommendations', iconKey: 'recommendations' },
+      { label: 'Action Tracker', to: '/actions', iconKey: 'actions' },
+      { label: 'Air Freight Watch', to: '/air-watch', iconKey: 'air' },
     ],
+  },
+  {
+    heading: 'REPORT',
+    items: [{ label: 'ESG Reporting', to: '/evidence', iconKey: 'evidence' }],
   },
   {
     heading: 'REFERENCE',

@@ -44,6 +44,12 @@ export function formatDistance(km: number): string {
   return `${numberFmt.format(Math.round(km))} km`;
 }
 
+/** Compact fuel volume: 12.3k L, 705 L. */
+export function formatLitres(litres: number): string {
+  if (Math.abs(litres) >= 10_000) return `${(litres / 1000).toFixed(1)}k L`;
+  return `${numberFmt.format(Math.round(litres))} L`;
+}
+
 export function formatPercent(value: number, dp = 1): string {
   return `${value.toFixed(dp)}%`;
 }
