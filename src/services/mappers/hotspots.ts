@@ -1,5 +1,5 @@
 /** Recompute emission hotspots from a scoped shipment set (so filters apply). */
-import type { Hotspots, HotspotRow, Lane, Shipment, ShipmentFilters } from '@/types';
+import type { CustomerModeRow, Hotspots, HotspotRow, Lane, MonthModeRow, Shipment, ShipmentFilters } from '@/types';
 
 const round = (n: number, dp = 2) => {
   const f = 10 ** dp;
@@ -32,6 +32,29 @@ function topGroups(
     .slice(0, limit);
 }
 
+/** Top-N customers broken down by transport mode (CO₂e), for stacked bars. */
+function customerModeMatrix(shipments: Shipment[], limit = 8): CustomerModeRow[] {
+  const m = new Map<string, CustomerModeRow>();
+  for (const s of shipments) {
+    const r = m.get(s.customer) ?? { customer: s.customer, Ocean: 0, Rail: 0, Road: 0, Air: 0, total: 0 };
+    r[s.primaryMode] = round(r[s.primaryMode] + s.co2eTonnes, 2);
+    r.total = round(r.total + s.co2eTonnes, 2);
+    m.set(s.customer, r);
+  }
+  return [...m.values()].sort((a, b) => b.total - a.total).slice(0, limit);
+}
+
+/** Monthly CO₂e split by mode (for a stacked-area trend). */
+function monthlyByMode(shipments: Shipment[]): MonthModeRow[] {
+  const m = new Map<string, MonthModeRow>();
+  for (const s of shipments) {
+    const r = m.get(s.period) ?? { period: s.period, Ocean: 0, Rail: 0, Road: 0, Air: 0 };
+    r[s.primaryMode] = round(r[s.primaryMode] + s.co2eTonnes, 2);
+    m.set(s.period, r);
+  }
+  return [...m.values()].sort((a, b) => (a.period < b.period ? -1 : 1));
+}
+
 export function buildHotspots(shipments: Shipment[]): Hotspots {
   return {
     byProductCategory: topGroups(shipments, (s) => s.category, (s) => s.category),
@@ -43,6 +66,8 @@ export function buildHotspots(shipments: Shipment[]): Hotspots {
     byVendor: topGroups(shipments, (s) => s.vendor, (s) => s.vendor),
     byLsp: topGroups(shipments, (s) => s.lsp, (s) => s.lsp),
     byOrigin: topGroups(shipments, (s) => s.origin, (s) => `${s.origin}, ${s.originState}`),
+    customerModeMatrix: customerModeMatrix(shipments),
+    monthlyByMode: monthlyByMode(shipments),
   };
 }
 

@@ -59,7 +59,7 @@ export interface CarbonDataSource {
   // Aggregates
   getFootprint(params?: ScopeParams): Promise<Footprint>;
   getHotspots(params?: ScopeParams): Promise<Hotspots>;
-  getPartners(): Promise<Partners>;
+  getPartners(params?: ScopeParams): Promise<Partners>;
   getEvidence(): Promise<EsgEvidence>;
   getPulse(params?: ScopeParams): Promise<PulseEvent[]>;
   getExceptions(params?: ScopeParams): Promise<ExceptionItem[]>;

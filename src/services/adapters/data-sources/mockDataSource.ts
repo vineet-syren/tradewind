@@ -39,6 +39,7 @@ import { getPersona } from '@/constants/personas';
 import { queryShipments, scopeAndFilter } from '@/services/mappers/shipmentQuery';
 import { buildFootprint } from '@/services/mappers/footprint';
 import { buildHotspots, filterLanes } from '@/services/mappers/hotspots';
+import { buildPartners } from '@/services/mappers/partners';
 import { buildFocusKpis } from '@/services/mappers/focus';
 import { composeCopilotReply } from '@/services/mappers/copilot';
 
@@ -91,7 +92,6 @@ export class MockDataSource implements CarbonDataSource {
   private loadShipments = once(async () => (await fetchJson<{ items: Shipment[] }>('shipments/index.json')).items);
   private loadLanes = once(async () => (await fetchJson<{ items: Lane[] }>('lanes/index.json')).items);
   private loadRecommendations = once(() => fetchJson<Recommendation[]>('recommendations.json'));
-  private loadPartners = once(() => fetchJson<Partners>('partners.json'));
   private loadEvidence = once(() => fetchJson<EsgEvidence>('evidence.json'));
   private loadPulse = once(() => fetchJson<PulseEvent[]>('pulse.json'));
   private loadExceptions = once(() => fetchJson<ExceptionItem[]>('exceptions.json'));
@@ -175,9 +175,9 @@ export class MockDataSource implements CarbonDataSource {
     await delay('normal');
     return buildHotspots(await this.scopedShipments(params));
   }
-  async getPartners(): Promise<Partners> {
+  async getPartners(params?: ScopeParams): Promise<Partners> {
     await delay('normal');
-    return this.loadPartners();
+    return buildPartners(await this.scopedShipments(params));
   }
   async getEvidence(): Promise<EsgEvidence> {
     await delay('normal');

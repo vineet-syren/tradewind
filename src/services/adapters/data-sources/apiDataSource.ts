@@ -63,7 +63,7 @@ export class ApiDataSource implements CarbonDataSource {
 
   getFootprint = (params?: ScopeParams) => this.get<Footprint>('/footprint', { persona: params?.persona, ...params?.filters });
   getHotspots = (params?: ScopeParams) => this.get<Hotspots>('/hotspots', { persona: params?.persona, ...params?.filters });
-  getPartners = () => this.get<Partners>('/partners');
+  getPartners = (params?: ScopeParams) => this.get<Partners>('/partners', { persona: params?.persona, ...params?.filters });
   getEvidence = () => this.get<EsgEvidence>('/evidence');
   getPulse = (params?: ScopeParams) => this.get<PulseEvent[]>('/pulse', { persona: params?.persona });
   getExceptions = (params?: ScopeParams) => this.get<ExceptionItem[]>('/exceptions', { persona: params?.persona });
