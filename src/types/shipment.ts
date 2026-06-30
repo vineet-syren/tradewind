@@ -32,6 +32,8 @@ export interface Shipment {
   laneId: string;
   period: string; // YYYY-MM
   year: number;
+  date: string; // YYYY-MM-DD — ship/departure date
+  eta: string; // YYYY-MM-DD — estimated arrival (date + transit)
   status: 'Delivered' | 'In transit' | 'Planned';
   productSku: string;
   productName: string;
@@ -75,6 +77,8 @@ export interface Shipment {
   airException: boolean;
   airAvoidable: boolean | null;
   reductionPotentialTonnes: number;
+  /** Per-shipment CO₂e avoidable by routing current → best (no annualization). */
+  avoidableTonnes: number;
   bestScenarioKind: string;
 }
 

@@ -29,6 +29,7 @@ import type {
   PersonaId,
   PulseEvent,
   Recommendation,
+  ScheduleSummary,
   Shipment,
   ShipmentDetail,
   ShipmentFilters,
@@ -36,7 +37,9 @@ import type {
 } from '@/types';
 import { AGENT_CATALOG } from '@/constants/agents';
 import { getPersona } from '@/constants/personas';
+import { APP_TODAY, PLAN_HORIZON_DAYS, addDaysISO } from '@/constants/app';
 import { queryShipments, scopeAndFilter } from '@/services/mappers/shipmentQuery';
+import { buildSchedule } from '@/services/mappers/schedule';
 import { buildFootprint } from '@/services/mappers/footprint';
 import { buildHotspots, filterLanes } from '@/services/mappers/hotspots';
 import { buildPartners } from '@/services/mappers/partners';
@@ -196,6 +199,19 @@ export class MockDataSource implements CarbonDataSource {
     const regions = params?.filters?.regions;
     if (!regions?.length) return exceptions;
     return exceptions.filter((e) => e.region === 'All' || regions.includes(e.region));
+  }
+  async getSchedule(params?: ScopeParams): Promise<ScheduleSummary> {
+    await delay('normal');
+    // Forward window: honour the user's date range, but never look backward —
+    // the scheduler is always about what's still to ship.
+    const f = params?.filters ?? {};
+    const fromDefault = addDaysISO(APP_TODAY, 1);
+    const toDefault = addDaysISO(APP_TODAY, PLAN_HORIZON_DAYS);
+    const from = f.dateFrom && f.dateFrom > fromDefault ? f.dateFrom : fromDefault;
+    const to = f.dateTo && f.dateTo > from ? f.dateTo : toDefault;
+    const scoped = scopeAndFilter(await this.loadShipments(), params?.persona, { ...f, dateFrom: from, dateTo: to });
+    const planned = scoped.filter((s) => s.date > APP_TODAY);
+    return buildSchedule(planned, { from, to });
   }
 
   // ── Recommendations & focus ────────────────────────────────────────────

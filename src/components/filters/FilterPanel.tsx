@@ -1,6 +1,7 @@
 import { Box, Button, Card, CardContent, Stack, TextField, Typography } from '@mui/material';
 import ClearRoundedIcon from '@mui/icons-material/ClearRounded';
 import { MultiSelectFilter } from './MultiSelectFilter';
+import { DateRangeFilter } from './DateRangeFilter';
 import { useDataSource } from '@/hooks/useDataSource';
 import { useAsync } from '@/hooks/useAsync';
 import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
@@ -30,7 +31,7 @@ export function FilterPanel({ showSearch = true }: { showSearch?: boolean }) {
           <MultiSelectFilter label="Product" options={opts.productCategories} value={filters.productCategories ?? []} onChange={(v) => dispatch(patchFilters({ productCategories: v }))} width={190} />
           <MultiSelectFilter label="Mode" options={opts.modes} value={filters.modes ?? []} onChange={(v) => dispatch(patchFilters({ modes: v as ModeLabel[] }))} width={150} />
           <MultiSelectFilter label="Customer" options={opts.customers} value={filters.customers ?? []} onChange={(v) => dispatch(patchFilters({ customers: v }))} width={200} />
-          <MultiSelectFilter label="Year" options={opts.years} value={filters.years ?? []} onChange={(v) => dispatch(patchFilters({ years: v }))} width={130} format={(v) => String(v)} />
+          <DateRangeFilter value={{ dateFrom: filters.dateFrom, dateTo: filters.dateTo }} onChange={(patch) => dispatch(patchFilters(patch))} />
           {showSearch && (
             <TextField
               size="small"

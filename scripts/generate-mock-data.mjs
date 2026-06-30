@@ -65,6 +65,12 @@ const round = (n, dp = 0) => {
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 const tsHoursAgo = (h) => new Date(AS_OF.getTime() - Math.round(h * HOUR_MS)).toISOString();
 const tsDaysAgo = (d) => new Date(AS_OF.getTime() - Math.round(d * DAY_MS)).toISOString();
+const AS_OF_ISO = AS_OF.toISOString().slice(0, 10); // '2026-06-30' (frozen "today")
+const addDays = (iso, n) => {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
 
 // ── Geography (real coordinates from the customer's Route_Dictionary) ────────
 // kind: origin (inland processing) | port (sea gateway) | dest (destination market)
@@ -303,10 +309,11 @@ function realizedReductionPct(period) {
   return clamp(0.02 + ramp * 0.12, 0, 0.14);
 }
 
-// Live status from the shipment's month relative to "today" (2026-06).
-function shipmentStatus(period) {
-  if (period === AS_OF_PERIOD) return 'Planned';
-  if (period === '2026-05' || period === '2026-04') return 'In transit';
+// Live status from the shipment's ship date + ETA relative to "today".
+// Future ship date → Planned (scheduled); shipped-but-not-arrived → In transit.
+function statusForDates(date, eta) {
+  if (date > AS_OF_ISO) return 'Planned';
+  if (eta > AS_OF_ISO) return 'In transit';
   return 'Delivered';
 }
 
@@ -504,6 +511,8 @@ function buildShipment() {
   const lsp = pick(LSPS);
   const period = pick(MONTHS);
   const year = Number(period.split('-')[0]);
+  // Day-level ship date within the month (day-wise shipment data).
+  const date = `${period}-${String(randInt(1, 28)).padStart(2, '0')}`;
 
   // ~6% air exceptions (tiny urgent/sample shipments); rest ocean-led containers.
   const isAir = rng() < 0.06;
@@ -523,6 +532,9 @@ function buildShipment() {
     origin, originPort, destPort, destCity, destCoord, weightTonnes, inlandMode, isAir,
   });
   const current = scenarios.current;
+  // ETA = ship date + expected transit; together they set the live status.
+  const eta = addDays(date, Math.max(1, Math.round(current.transitDays)));
+  const status = statusForDates(date, eta);
 
   // Apply realized program reduction to recent periods (so the trend bends down).
   const realized = realizedReductionPct(period);
@@ -535,6 +547,9 @@ function buildShipment() {
 
   const best = scenarios.best;
   const reductionPotentialTonnes = round(Math.max(0, current.co2eTonnes - best.co2eTonnes) * monthlyTrips, 2);
+  // Per-shipment avoidable (this single move, current → best) — used for the
+  // forward window so the scheduler doesn't sum annualized lane potential.
+  const avoidableTonnes = round(Math.max(0, co2eTonnes - best.co2eTonnes), 3);
 
   shipSeq += 1;
   const shipmentId = `shp-${String(shipSeq).padStart(4, '0')}`;
@@ -543,7 +558,9 @@ function buildShipment() {
     shipmentId,
     period,
     year,
-    status: shipmentStatus(period),
+    date,
+    eta,
+    status,
     productSku: product.sku,
     productName: product.name,
     category: product.category,
@@ -587,6 +604,7 @@ function buildShipment() {
     airException: isAir,
     airAvoidable,
     reductionPotentialTonnes,
+    avoidableTonnes,
     bestScenarioKind: 'best_co2',
     // carried for detail/aggregation, stripped from the light index
     _scenarios: scenarios,
@@ -594,6 +612,35 @@ function buildShipment() {
     _lsp: lsp,
     _product: product,
     _customer: customer,
+  };
+}
+
+// ── Forward schedule (future planned shipments) ─────────────────────────────
+// Project a recurring lane into the future: clone a recent shipment (so lane,
+// route and scenarios stay consistent — "based on previous data and trends"),
+// re-date it forward, mark it Planned, and carry the reduction ramp a little
+// further. These power the Scheduler / forward-planning views.
+function buildPlannedShipment(template, date) {
+  shipSeq += 1;
+  const shipmentId = `shp-${String(shipSeq).padStart(4, '0')}`;
+  const period = date.slice(0, 7);
+  const year = Number(date.slice(0, 4));
+  const eta = addDays(date, Math.max(1, Math.round(template.transitDays)));
+  const daysOut = Math.round((new Date(`${date}T00:00:00Z`).getTime() - AS_OF.getTime()) / DAY_MS);
+  const realized = clamp(0.14 + (daysOut / 30) * 0.005, 0.14, 0.17); // continued ramp
+  const co2eTonnes = round(template.co2eGrossTonnes * (1 - realized), 3);
+  return {
+    ...template,
+    shipmentId,
+    period,
+    year,
+    date,
+    eta,
+    status: 'Planned',
+    co2eTonnes,
+    co2ePerTonne: round(co2eTonnes / template.weightTonnes, 3),
+    realizedReductionPct: round(realized * 100, 1),
+    avoidableTonnes: round(Math.max(0, co2eTonnes - template._scenarios.best.co2eTonnes), 3),
   };
 }
 
@@ -1166,6 +1213,24 @@ function main() {
   const laneByShipment = new Map();
   for (const l of lanes) for (const sid of l._members) laneByShipment.set(sid, l.laneId);
 
+  // Forward schedule — project the next horizon from recent lane cadence.
+  const PLAN_HORIZON_DAYS = 100;
+  const recentCut = addDays(AS_OF_ISO, -180);
+  const planPool = shipments.filter((s) => s.date >= recentCut);
+  const pool = planPool.length ? planPool : shipments;
+  const plannedCount = Math.max(56, Math.round((pool.length / 180) * PLAN_HORIZON_DAYS));
+  const templateFor = new Map();
+  const planned = [];
+  for (let i = 0; i < plannedCount; i++) {
+    const template = pick(pool);
+    const date = addDays(AS_OF_ISO, randInt(2, PLAN_HORIZON_DAYS));
+    const p = buildPlannedShipment(template, date);
+    templateFor.set(p.shipmentId, template.shipmentId);
+    planned.push(p);
+  }
+  const allShipments = [...shipments, ...planned];
+  const laneIdOf = (s) => laneByShipment.get(s.shipmentId) ?? laneByShipment.get(templateFor.get(s.shipmentId));
+
   const recs = [...buildRecommendations(lanes), ...buildAirRecs(shipments, laneByShipment)].sort(
     (a, b) => b.priorityScore - a.priorityScore,
   );
@@ -1183,8 +1248,8 @@ function main() {
   }
 
   // Per-shipment detail chunks (legs + calc breakdown + lane pointer).
-  for (const s of shipments) {
-    const laneId = laneByShipment.get(s.shipmentId);
+  for (const s of allShipments) {
+    const laneId = laneIdOf(s);
     const ownRecs = [
       ...(recsByShipment.get(s.shipmentId) ?? []),
       ...(recsByLane.get(laneId) ?? []).filter((r) => !r.shipmentId),
@@ -1208,10 +1273,10 @@ function main() {
     });
   }
 
-  const lightShipments = shipments.map((s) => {
+  const lightShipments = allShipments.map((s) => {
     const { co2eGrossTonnes, ...rest } = stripShipment(s);
     void co2eGrossTonnes;
-    return { ...rest, laneId: laneByShipment.get(s.shipmentId) };
+    return { ...rest, laneId: laneIdOf(s) };
   });
   const lightLanes = lanes.map(stripLane);
 
@@ -1221,7 +1286,7 @@ function main() {
   writeJson('hotspots.json', buildHotspots(shipments));
   writeJson('partners.json', buildPartners(shipments, recs));
   writeJson('evidence.json', buildEvidence(shipments));
-  writeJson('pulse.json', buildPulse(lanes, recs, shipments));
+  writeJson('pulse.json', buildPulse(lanes, recs, allShipments));
   writeJson('exceptions.json', buildExceptions(shipments, lanes));
   writeJson('emission-factors.json', EMISSION_FACTORS);
   writeJson('copilot-suggestions.json', COPILOT_SUGGESTIONS);
@@ -1238,6 +1303,9 @@ function main() {
     ambitionPct: round(REDUCTION_AMBITION * 100, 0),
     totalNetCo2eTonnes: totalNet,
     scope: 'Scope 3 · Downstream Transportation',
+    planHorizonDays: PLAN_HORIZON_DAYS,
+    planHorizonEnd: addDays(AS_OF_ISO, PLAN_HORIZON_DAYS),
+    plannedShipmentCount: planned.length,
   });
 
   writeJson('filter-options.json', {

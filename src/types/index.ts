@@ -13,6 +13,7 @@ export * from './pulse';
 export * from './exception';
 export * from './footprint';
 export * from './filters';
+export * from './schedule';
 export * from './copilot';
 export * from './action';
 export * from './assumptions';

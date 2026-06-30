@@ -26,6 +26,7 @@ import type {
   PersonaId,
   PulseEvent,
   Recommendation,
+  ScheduleSummary,
   Shipment,
   ShipmentDetail,
   ShipmentFilters,
@@ -63,6 +64,9 @@ export interface CarbonDataSource {
   getEvidence(): Promise<EsgEvidence>;
   getPulse(params?: ScopeParams): Promise<PulseEvent[]>;
   getExceptions(params?: ScopeParams): Promise<ExceptionItem[]>;
+
+  // Forward planning (scheduler) — future-dated shipments in the planning window
+  getSchedule(params?: ScopeParams): Promise<ScheduleSummary>;
 
   // Recommendations & focus
   getRecommendations(

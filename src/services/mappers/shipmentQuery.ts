@@ -3,6 +3,7 @@
  * server would run before responding. UI never does this itself.
  */
 import type { Paginated, PersonaId, Shipment, ShipmentFilters, ShipmentQuery } from '@/types';
+import { APP_TODAY } from '@/constants/app';
 
 /**
  * Persona scope. Terova's footprint is one company network, so every persona
@@ -15,11 +16,20 @@ export function scopeByPersona(shipments: Shipment[], _persona?: PersonaId): Shi
 }
 
 export function applyFilters(shipments: Shipment[], f?: ShipmentFilters): Shipment[] {
-  if (!f) return shipments;
+  if (!f) return shipments.filter((s) => s.date <= APP_TODAY);
   const inSet = (v: string | number, arr?: (string | number)[]) => !arr?.length || arr.includes(v);
   const search = f.search?.trim().toLowerCase();
+  // Date window. With no range set we default to actuals (≤ today) so historical
+  // analytics never absorb future planned shipments; a range can reach forward.
+  const dateOk = (d: string) => {
+    if (f.dateFrom && d < f.dateFrom) return false;
+    if (f.dateTo && d > f.dateTo) return false;
+    if (!f.dateFrom && !f.dateTo && d > APP_TODAY) return false;
+    return true;
+  };
   return shipments.filter(
     (s) =>
+      dateOk(s.date) &&
       inSet(s.region, f.regions) &&
       inSet(s.market, f.markets) &&
       inSet(s.category, f.productCategories) &&

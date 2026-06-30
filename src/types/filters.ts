@@ -11,6 +11,8 @@ export interface ShipmentFilters {
   lsps?: string[];
   originPorts?: string[];
   years?: number[];
+  dateFrom?: string; // YYYY-MM-DD inclusive
+  dateTo?: string; // YYYY-MM-DD inclusive
   search?: string;
 }
 

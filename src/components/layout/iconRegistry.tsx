@@ -11,6 +11,7 @@ import FlightRoundedIcon from '@mui/icons-material/FlightRounded';
 import FactCheckRoundedIcon from '@mui/icons-material/FactCheckRounded';
 import FunctionsRoundedIcon from '@mui/icons-material/FunctionsRounded';
 import Inventory2RoundedIcon from '@mui/icons-material/Inventory2Rounded';
+import CalendarMonthRoundedIcon from '@mui/icons-material/CalendarMonthRounded';
 import DirectionsBoatRoundedIcon from '@mui/icons-material/DirectionsBoatRounded';
 import TrainRoundedIcon from '@mui/icons-material/TrainRounded';
 import LocalShippingRoundedIcon from '@mui/icons-material/LocalShippingRounded';
@@ -27,6 +28,7 @@ const REGISTRY: Record<string, (p: SvgIconProps) => ReactElement> = {
   partners: (p) => <Diversity3RoundedIcon {...p} />,
   actions: (p) => <BoltRoundedIcon {...p} />,
   recommendations: (p) => <TipsAndUpdatesRoundedIcon {...p} />,
+  scheduler: (p) => <CalendarMonthRoundedIcon {...p} />,
   air: (p) => <FlightRoundedIcon {...p} />,
   evidence: (p) => <FactCheckRoundedIcon {...p} />,
   methodology: (p) => <FunctionsRoundedIcon {...p} />,

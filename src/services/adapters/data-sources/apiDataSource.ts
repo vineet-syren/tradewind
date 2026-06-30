@@ -25,6 +25,7 @@ import type {
   PersonaId,
   PulseEvent,
   Recommendation,
+  ScheduleSummary,
   Shipment,
   ShipmentDetail,
   ShipmentFilters,
@@ -67,6 +68,7 @@ export class ApiDataSource implements CarbonDataSource {
   getEvidence = () => this.get<EsgEvidence>('/evidence');
   getPulse = (params?: ScopeParams) => this.get<PulseEvent[]>('/pulse', { persona: params?.persona });
   getExceptions = (params?: ScopeParams) => this.get<ExceptionItem[]>('/exceptions', { persona: params?.persona });
+  getSchedule = (params?: ScopeParams) => this.get<ScheduleSummary>('/schedule', { persona: params?.persona, ...params?.filters });
 
   getRecommendations = (params: ScopeParams & { laneId?: string; ownerPersona?: PersonaId } = {}) =>
     this.get<Recommendation[]>('/recommendations', { persona: params.persona, laneId: params.laneId, ownerPersona: params.ownerPersona, ...params.filters });

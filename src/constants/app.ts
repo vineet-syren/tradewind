@@ -1,6 +1,16 @@
 /** App-wide constants. APP_TODAY mirrors the generator's frozen as-of date. */
 export const APP_TODAY = '2026-06-30';
 
+/** Forward-planning window (days) for the Scheduler — matches the generator. */
+export const PLAN_HORIZON_DAYS = 100;
+
+/** Add days to a YYYY-MM-DD string (UTC), returning YYYY-MM-DD. */
+export function addDaysISO(iso: string, n: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
 export const APP_META = {
   name: 'Tradewind',
   tagline: 'Steer every shipment to its lowest-carbon lane.',
