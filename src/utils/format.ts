@@ -62,6 +62,13 @@ export function formatPercent(value: number, dp = 1): string {
   return `${value.toFixed(dp)}%`;
 }
 
+/** CO₂e transport intensity in grams per tonne-kilometre (the GLEC unit). */
+export function formatIntensity(gPerTonneKm: number): string {
+  if (gPerTonneKm >= 100) return `${Math.round(gPerTonneKm)} g/t·km`;
+  if (gPerTonneKm >= 10) return `${gPerTonneKm.toFixed(1)} g/t·km`;
+  return `${gPerTonneKm.toFixed(2)} g/t·km`;
+}
+
 export function formatSignedPercent(value: number, dp = 1): string {
   const sign = value > 0 ? '+' : '';
   return `${sign}${value.toFixed(dp)}%`;
@@ -96,7 +103,7 @@ export function formatMetric(value: number, unit: MetricUnit): string {
     case 'percent':
       return formatPercent(value, value % 1 === 0 ? 0 : 1);
     case 'intensity':
-      return `${value.toFixed(3)} t/t`;
+      return formatIntensity(value);
     case 'ratio':
       return `${value.toFixed(2)}×`;
     case 'index':

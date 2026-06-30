@@ -11,7 +11,7 @@ import { TableSkeleton } from '@/components/loaders/Skeletons';
 import { ModeChip, SeverityChip } from '@/components/shared/Chips';
 import { LegTimeline } from './LegTimeline';
 import { RecommendationCard } from './RecommendationCard';
-import { formatCurrency, formatTonnes } from '@/utils/format';
+import { formatCurrency, formatTonnes, formatIntensity } from '@/utils/format';
 
 export function ShipmentDetailContent({ shipmentId, onToast }: { shipmentId: string; onToast: (m: string) => void }) {
   const ds = useDataSource();
@@ -74,7 +74,7 @@ export function ShipmentDetailContent({ shipmentId, onToast }: { shipmentId: str
             Attributed CO₂e
           </Typography>
           <Typography variant="body2" sx={{ fontWeight: 700, color: 'primary.main' }}>
-            {formatTonnes(s.co2eTonnes)} ({s.co2ePerTonne} t/t)
+            {formatTonnes(s.co2eTonnes)} ({formatIntensity(s.co2ePerTonneKm)})
           </Typography>
         </Stack>
         {s.realizedReductionPct > 0 && (

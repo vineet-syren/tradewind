@@ -6,6 +6,8 @@ export interface HotspotRow {
   weightTonnes: number;
   shipments: number;
   co2ePerTonne: number;
+  /** True transport intensity — g CO₂e per tonne-kilometre. */
+  co2ePerTonneKm: number;
 }
 
 export interface CustomerModeRow {

@@ -70,6 +70,8 @@ export interface Shipment {
   airDistanceKm: number;
   co2eTonnes: number;
   co2ePerTonne: number;
+  /** True transport intensity — g CO₂e per tonne-kilometre. */
+  co2ePerTonneKm: number;
   realizedReductionPct: number;
   freightUsd: number;
   transitDays: number;

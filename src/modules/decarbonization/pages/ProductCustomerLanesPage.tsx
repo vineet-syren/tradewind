@@ -21,9 +21,7 @@ import { useAsync } from '@/hooks/useAsync';
 import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
 import { setSelectedLane } from '@/app/store/uiSlice';
 import type { KpiMetric, Lane } from '@/types';
-import { formatTonnes } from '@/utils/format';
-
-const intensityFmt = (v: number) => `${v.toFixed(3)} t/t`;
+import { formatTonnes, formatIntensity } from '@/utils/format';
 
 export default function ProductCustomerLanesPage() {
   const ds = useDataSource();
@@ -47,17 +45,17 @@ export default function ProductCustomerLanesPage() {
   // percentile so the bulk of lanes spread out, and pin the air outliers to the
   // right edge — which is exactly where the "high-intensity, act-first" lanes belong.
   const plotted = (lanes ?? []).slice(0, 60);
-  const sortedInt = plotted.map((l) => l.avgCo2ePerTonne).sort((a, b) => a - b);
+  const sortedInt = plotted.map((l) => l.avgCo2ePerTonneKm).sort((a, b) => a - b);
   const pct = (p: number) => (sortedInt.length ? sortedInt[Math.min(sortedInt.length - 1, Math.floor(sortedInt.length * p))] : 0);
-  const xCap = Math.max(0.4, Math.ceil(pct(0.85) * 10) / 10);
+  const xCap = Math.max(1, Math.ceil(pct(0.85)));
   const medianIntensity = pct(0.5);
   const lanePoints: BubblePoint[] = plotted.map((l) => ({
     name: l.label,
-    x: Math.min(l.avgCo2ePerTonne, xCap),
+    x: Math.min(l.avgCo2ePerTonneKm, xCap),
     y: l.totalCo2eTonnes,
     z: l.shipmentCount,
     color: l.hasAirExceptions ? theme.palette.error.main : theme.palette.primary.main,
-    meta: `${l.customer} · ${formatTonnes(l.realizableReductionTonnes)}/yr realizable${l.avgCo2ePerTonne > xCap ? ' · off-scale intensity (air)' : ''}`,
+    meta: `${l.customer} · ${formatTonnes(l.realizableReductionTonnes)}/yr realizable${l.avgCo2ePerTonneKm > xCap ? ' · off-scale intensity (air)' : ''}`,
   }));
 
   const columns: Column<Lane>[] = [
@@ -66,7 +64,7 @@ export default function ProductCustomerLanesPage() {
     { key: 'customer', header: 'Customer', render: (l) => l.customer, sortValue: (l) => l.customer },
     { key: 'ships', header: 'Shipments', align: 'right', render: (l) => l.shipmentCount, sortValue: (l) => l.shipmentCount },
     { key: 'co2e', header: 'CO₂e', align: 'right', render: (l) => <strong>{formatTonnes(l.totalCo2eTonnes)}</strong>, sortValue: (l) => l.totalCo2eTonnes },
-    { key: 'intensity', header: 't/t', align: 'right', render: (l) => l.avgCo2ePerTonne, sortValue: (l) => l.avgCo2ePerTonne },
+    { key: 'intensity', header: 'g/t·km', align: 'right', render: (l) => formatIntensity(l.avgCo2ePerTonneKm), sortValue: (l) => l.avgCo2ePerTonneKm },
     { key: 'reduction', header: 'Save/yr', align: 'right', render: (l) => <span style={{ color: '#0C8B7B', fontWeight: 700 }}>{formatTonnes(l.realizableReductionTonnes)}</span>, sortValue: (l) => l.realizableReductionTonnes },
     { key: 'approach', header: 'Recommended', align: 'center', render: (l) => <ApproachChip kind={l.recommendedApproach} />, sortValue: (l) => l.recommendedApproach },
   ];
@@ -102,7 +100,7 @@ export default function ProductCustomerLanesPage() {
         <ChartContainer title="Lane priority" subtitle="CO₂e vs intensity · bubble = shipments · top-right = high volume & high intensity (act first)" icon={<ScatterPlotRounded sx={{ fontSize: 18 }} />}>
           {lanes ? (
             <>
-              <ScatterBubbleChart points={lanePoints} xLabel="CO₂ per ton-km" yLabel="CO₂e" sizeLabel="Shipments" xFormat={intensityFmt} yFormat={formatTonnes} refX={medianIntensity} refXLabel="median" xDomain={[0, xCap]} height={300} />
+              <ScatterBubbleChart points={lanePoints} xLabel="CO₂e per ton-km" yLabel="CO₂e" sizeLabel="Shipments" xFormat={formatIntensity} yFormat={formatTonnes} refX={medianIntensity} refXLabel="median" xDomain={[0, xCap]} height={300} />
               <SwatchLegend items={[{ color: theme.palette.primary.main, label: 'Ocean-led lane' }, { color: theme.palette.error.main, label: 'Has air exceptions' }]} />
             </>
           ) : <ChartSkeleton height={300} />}

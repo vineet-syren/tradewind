@@ -57,6 +57,8 @@ export interface Lane {
   totalWeightTonnes: number;
   totalCo2eTonnes: number;
   avgCo2ePerTonne: number;
+  /** True transport intensity — g CO₂e per tonne-kilometre. */
+  avgCo2ePerTonneKm: number;
   annualFrequency: number;
   repWeightTonnes: number;
   currentPerShipmentTonnes: number;

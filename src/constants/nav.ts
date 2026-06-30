@@ -31,7 +31,6 @@ export const NAV_GROUPS: NavGroupDef[] = [
       { label: 'Shipment Planner', to: '/scheduler', iconKey: 'scheduler' },
       { label: 'Reduction Opportunities', to: '/recommendations', iconKey: 'recommendations' },
       { label: 'Action Tracker', to: '/actions', iconKey: 'actions' },
-      { label: 'Air Freight Watch', to: '/air-watch', iconKey: 'air' },
     ],
   },
   {

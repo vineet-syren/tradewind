@@ -26,7 +26,7 @@ export interface Footprint {
   totalCo2eTonnes: number;
   annualCo2eTonnes: number;
   totalWeightTonnes: number;
-  avgIntensity: number; // t CO₂e per tonne shipped
+  avgIntensity: number; // g CO₂e per tonne-kilometre
   shipmentCount: number;
   laneCount: number;
   modeSplit: ModeSplitRow[];

@@ -12,7 +12,6 @@ const PartnerInfluencePage = lazy(() => import('@/modules/decarbonization/pages/
 const ActionCenterPage = lazy(() => import('@/modules/decarbonization/pages/ActionCenterPage'));
 const RecommendationsPage = lazy(() => import('@/modules/decarbonization/pages/RecommendationsPage'));
 const SchedulerPage = lazy(() => import('@/modules/decarbonization/pages/SchedulerPage'));
-const AirWatchPage = lazy(() => import('@/modules/decarbonization/pages/AirWatchPage'));
 const EvidencePackPage = lazy(() => import('@/modules/decarbonization/pages/EvidencePackPage'));
 const MethodologyPage = lazy(() => import('@/modules/decarbonization/pages/MethodologyPage'));
 
@@ -30,7 +29,6 @@ export function AppRouter() {
           <Route path="/actions" element={<ActionCenterPage />} />
           <Route path="/recommendations" element={<RecommendationsPage />} />
           <Route path="/scheduler" element={<SchedulerPage />} />
-          <Route path="/air-watch" element={<AirWatchPage />} />
           <Route path="/evidence" element={<EvidencePackPage />} />
           <Route path="/methodology" element={<MethodologyPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

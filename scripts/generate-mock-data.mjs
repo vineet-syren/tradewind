@@ -31,7 +31,7 @@ const OUT = join(__dirname, '..', 'public', 'mock-data');
 // 2020-2022 / 2021-2023 / 2022-2024 workbook tabs).
 const AS_OF = new Date('2026-06-30T00:00:00Z');
 const AS_OF_PERIOD = '2026-06';
-const BASELINE_YEAR = 2022;
+const BASELINE_YEAR = 2020;
 const LATEST_YEAR = 2026;
 const REDUCTION_AMBITION = 0.15; // 10–20% medium-term ambition (mid-point)
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -500,7 +500,7 @@ const CUSTOMER_WEIGHTS = {
   'Levant Spice Trading': 2,
   'Nippon Flavour KK': 1.6,
 };
-function buildShipment() {
+function buildShipment(forcedPeriod) {
   const product = pickWeighted(PRODUCTS.map((p) => [p, p.category === 'Chilli & Cayenne' ? 3 : 1]));
   const customer = pickWeighted(CUSTOMERS.map((c) => [c, CUSTOMER_WEIGHTS[c.name] ?? 1]));
   const region = customer.region;
@@ -509,7 +509,7 @@ function buildShipment() {
   const origin = vendor.origin;
   const originPort = pick(PORT_BY_REGION[region] ?? ['Nhava Sheva']);
   const lsp = pick(LSPS);
-  const period = pick(MONTHS);
+  const period = forcedPeriod ?? pick(MONTHS);
   const year = Number(period.split('-')[0]);
   // Day-level ship date within the month (day-wise shipment data).
   const date = `${period}-${String(randInt(1, 28)).padStart(2, '0')}`;
@@ -541,6 +541,7 @@ function buildShipment() {
   const co2eTonnes = round(current.co2eTonnes * (1 - realized), 3);
   const totalDistanceKm = round(current.legs.reduce((s, l) => s + l.distanceKm, 0), 1);
   const co2ePerTonne = round(co2eTonnes / weightTonnes, 3);
+  const co2ePerTonneKm = round((co2eTonnes * 1e6) / Math.max(weightTonnes * totalDistanceKm, 0.001), 1); // g CO₂e/t·km
 
   const airAvoidable = isAir ? rng() < 0.7 : null;
   const dataConfidence = pickWeighted([['High', 5], ['Medium', 3], ['Low', 1.4]]);
@@ -597,6 +598,7 @@ function buildShipment() {
     co2eTonnes,
     co2eGrossTonnes: current.co2eTonnes,
     co2ePerTonne,
+    co2ePerTonneKm,
     realizedReductionPct: round(realized * 100, 1),
     freightUsd: current.freightUsd,
     transitDays: current.transitDays,
@@ -639,6 +641,7 @@ function buildPlannedShipment(template, date) {
     status: 'Planned',
     co2eTonnes,
     co2ePerTonne: round(co2eTonnes / template.weightTonnes, 3),
+    co2ePerTonneKm: round((co2eTonnes * 1e6) / Math.max(template.weightTonnes * template.totalDistanceKm, 0.001), 1),
     realizedReductionPct: round(realized * 100, 1),
     avoidableTonnes: round(Math.max(0, co2eTonnes - template._scenarios.best.co2eTonnes), 3),
   };
@@ -678,6 +681,8 @@ function buildLanes(shipments) {
     const repWeight = Math.max(9, round(repMembers.reduce((s, m) => s + m.weightTonnes, 0) / repMembers.length, 2));
     const annualFrequency = Math.max(1, Math.round(repMembers.reduce((s, m) => s + m.monthlyTrips, 0) / 3));
     const avgCo2ePerTonne = round(totalCo2eTonnes / Math.max(totalWeightTonnes, 0.001), 3);
+    const totalTonKm = members.reduce((s, m) => s + m.weightTonnes * m.totalDistanceKm, 0);
+    const avgCo2ePerTonneKm = round((totalCo2eTonnes * 1e6) / Math.max(totalTonKm, 0.001), 1); // g CO₂e/t·km
 
     const sampleInland = repMembers.find((m) => m.inlandMode)?.inlandMode || 'Road';
     const scenarios = buildScenarios({
@@ -735,6 +740,7 @@ function buildLanes(shipments) {
       totalWeightTonnes,
       totalCo2eTonnes,
       avgCo2ePerTonne,
+      avgCo2ePerTonneKm,
       annualFrequency,
       repWeightTonnes: repWeight,
       // Per representative shipment (scenarios are modelled per shipment).
@@ -1202,13 +1208,28 @@ function stripShipment(s) {
   return { ...rest, co2eGrossTonnes };
 }
 
-const SHIPMENT_COUNT = 380;
+const SHIPMENT_COUNT = 600;
 
 function main() {
   rmSync(OUT, { recursive: true, force: true });
   mkdirSync(OUT, { recursive: true });
 
-  const shipments = Array.from({ length: SHIPMENT_COUNT }, () => buildShipment());
+  // Distribute shipments evenly across years (mild volume growth) so annual
+  // totals reflect the per-shipment reduction ramp — not random per-year counts.
+  // 2026 is partial (to AS_OF), so it gets a half quota over Jan–Jun.
+  const fullYears = [];
+  for (let y = BASELINE_YEAR; y < LATEST_YEAR; y++) fullYears.push(y);
+  const growth = (i) => 1 + i * 0.03; // ~3%/yr volume growth
+  const weightSum = fullYears.reduce((s, _y, i) => s + growth(i), 0) + 0.5; // +0.5 for partial 2026
+  const baseN = SHIPMENT_COUNT / weightSum;
+  const periods = [];
+  fullYears.forEach((y, i) => {
+    const n = Math.round(baseN * growth(i));
+    for (let k = 0; k < n; k++) periods.push(`${y}-${String(randInt(1, 12)).padStart(2, '0')}`);
+  });
+  const n26 = Math.round(baseN * 0.5);
+  for (let k = 0; k < n26; k++) periods.push(`${LATEST_YEAR}-${String(randInt(1, 6)).padStart(2, '0')}`);
+  const shipments = periods.map((p) => buildShipment(p));
   const lanes = buildLanes(shipments);
   const laneByShipment = new Map();
   for (const l of lanes) for (const sid of l._members) laneByShipment.set(sid, l.laneId);

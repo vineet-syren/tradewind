@@ -18,7 +18,6 @@ import HistoryRoundedIcon from '@mui/icons-material/HistoryRounded';
 import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ScopeNote } from '@/components/layout/ScopeNote';
-import { FilterPanel } from '@/components/filters/FilterPanel';
 import { KpiCard } from '@/components/cards/KpiCard';
 import { EquivalentsStrip } from '@/components/cards/EquivalentsStrip';
 import { ChartContainer } from '@/components/charts/ChartContainer';
@@ -108,8 +107,6 @@ export default function CommandCenterPage() {
         subtitle={p.lens}
         actions={<ScopeNote />}
       />
-
-      <FilterPanel />
 
       {/* Prompt hero */}
       <Card sx={{ mb: 3 }}>

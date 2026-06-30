@@ -21,7 +21,7 @@ import { useAsync } from '@/hooks/useAsync';
 import { ModeIcon } from '@/components/layout/iconRegistry';
 import type { ApproachKind } from '@/types';
 import { APPROACH_LABEL } from '@/constants/app';
-import { formatTonnes, formatDistance, formatCurrency, formatNumber, formatWeightTonnes, formatDate } from '@/utils/format';
+import { formatTonnes, formatDistance, formatCurrency, formatNumber, formatWeightTonnes, formatIntensity, formatDate } from '@/utils/format';
 
 const STATUS_COLOR: Record<string, 'success' | 'warning' | 'info' | 'default'> = {
   Delivered: 'success',
@@ -64,7 +64,7 @@ export function ShipmentDetailDialog({ shipmentId, onClose }: { shipmentId: stri
           <DialogContent dividers>
             <Box sx={{ display: 'grid', gap: 1.75, gridTemplateColumns: { xs: 'repeat(2,1fr)', sm: 'repeat(4,1fr)' }, mb: 2 }}>
               <Fact label="CO₂e" value={formatTonnes(s.co2eTonnes)} />
-              <Fact label="Intensity" value={`${s.co2ePerTonne.toFixed(3)} t/t`} />
+              <Fact label="Intensity" value={formatIntensity(s.co2ePerTonneKm)} />
               <Fact label="Weight" value={formatWeightTonnes(s.weightTonnes)} />
               <Fact label="Distance" value={formatDistance(s.totalDistanceKm)} />
               <Fact label="Freight cost" value={formatCurrency(s.freightUsd)} />

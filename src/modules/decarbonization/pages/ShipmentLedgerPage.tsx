@@ -14,7 +14,7 @@ import { useAsync } from '@/hooks/useAsync';
 import { useAppSelector } from '@/app/store/hooks';
 import type { Shipment } from '@/types';
 import { APP_TODAY } from '@/constants/app';
-import { formatTonnes, formatDistance, formatCurrency, formatNumber, formatWeightTonnes, formatDate } from '@/utils/format';
+import { formatTonnes, formatDistance, formatCurrency, formatNumber, formatWeightTonnes, formatIntensity, formatDate } from '@/utils/format';
 
 const STATUS_COLOR: Record<string, 'success' | 'warning' | 'info' | 'default'> = {
   Delivered: 'success',
@@ -51,8 +51,9 @@ export default function ShipmentLedgerPage() {
   const totals = useMemo(() => {
     const co2e = rows.reduce((a, s) => a + s.co2eTonnes, 0);
     const weight = rows.reduce((a, s) => a + s.weightTonnes, 0);
+    const tonKm = rows.reduce((a, s) => a + s.weightTonnes * s.totalDistanceKm, 0);
     const byStatus = rows.reduce<Record<string, number>>((acc, s) => ((acc[s.status] = (acc[s.status] ?? 0) + 1), acc), {});
-    return { co2e, weight, intensity: weight ? co2e / weight : 0, byStatus };
+    return { co2e, weight, intensity: tonKm ? (co2e * 1e6) / tonKm : 0, byStatus };
   }, [rows]);
 
   const period = filters.dateFrom || filters.dateTo
@@ -71,7 +72,7 @@ export default function ShipmentLedgerPage() {
     { key: 'distance', header: 'Distance', align: 'right', render: (s) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDistance(s.totalDistanceKm)}</span>, sortValue: (s) => s.totalDistanceKm },
     { key: 'freight', header: 'Freight', align: 'right', render: (s) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatCurrency(s.freightUsd)}</span>, sortValue: (s) => s.freightUsd },
     { key: 'co2e', header: 'CO₂e', align: 'right', render: (s) => <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{formatTonnes(s.co2eTonnes)}</strong>, sortValue: (s) => s.co2eTonnes },
-    { key: 'intensity', header: 't/t', align: 'right', render: (s) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{s.co2ePerTonne.toFixed(3)}</span>, sortValue: (s) => s.co2ePerTonne },
+    { key: 'intensity', header: 'g/t·km', align: 'right', render: (s) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatIntensity(s.co2ePerTonneKm)}</span>, sortValue: (s) => s.co2ePerTonneKm },
     { key: 'carrier', header: 'Carrier', render: (s) => s.carrier, sortValue: (s) => s.carrier },
   ];
 
@@ -97,7 +98,7 @@ export default function ShipmentLedgerPage() {
               <Stat label="Shipments" value={formatNumber(rows.length)} />
               <Stat label="Total CO₂e" value={formatTonnes(totals.co2e)} />
               <Stat label="Total weight" value={`${formatNumber(totals.weight)} t`} />
-              <Stat label="Avg intensity" value={`${totals.intensity.toFixed(3)} t/t`} />
+              <Stat label="Avg intensity" value={formatIntensity(totals.intensity)} />
             </Stack>
             <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
               {(['Delivered', 'In transit', 'Planned'] as const).map((st) =>

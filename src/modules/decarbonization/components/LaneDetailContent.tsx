@@ -12,7 +12,7 @@ import { WorldMap } from '@/components/map/WorldMap';
 import { ScenarioCard } from './ScenarioCard';
 import { LegTimeline } from './LegTimeline';
 import { RecommendationCard } from './RecommendationCard';
-import { formatTonnes } from '@/utils/format';
+import { formatTonnes, formatIntensity } from '@/utils/format';
 
 const SCEN_TABS: { key: keyof LaneDetail['scenarios']; label: string }[] = [
   { key: 'current', label: 'Current' },
@@ -61,7 +61,7 @@ export function LaneDetailContent({ laneId, onToast }: { laneId: string; onToast
         <Metric label="Total CO₂e (lane)" value={formatTonnes(lane.totalCo2eTonnes)} />
         <Metric label="Realizable reduction" value={`${formatTonnes(lane.realizableReductionTonnes)}/yr`} accent />
         <Metric label="Shipments · annual trips" value={`${lane.shipmentCount} · ${lane.annualFrequency}/yr`} />
-        <Metric label="Intensity" value={`${lane.avgCo2ePerTonne} t/t`} />
+        <Metric label="Intensity" value={formatIntensity(lane.avgCo2ePerTonneKm)} />
       </Box>
 
       <ChartContainer title="Map" subtitle="Inland → ocean → delivery legs">

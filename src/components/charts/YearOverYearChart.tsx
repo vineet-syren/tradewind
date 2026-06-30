@@ -1,7 +1,7 @@
 import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useTheme } from '@mui/material/styles';
 import type { YearPoint } from '@/types';
-import { formatTonnes } from '@/utils/format';
+import { formatTonnes, formatIntensity } from '@/utils/format';
 
 /**
  * Year-over-year emissions (bars) with CO₂ per-tonne intensity (line) — the
@@ -16,9 +16,9 @@ export function YearOverYearChart({ data, height = 260 }: { data: YearPoint[]; h
         <CartesianGrid strokeDasharray="3 3" stroke={theme.palette.divider} vertical={false} />
         <XAxis dataKey="year" tick={{ fontSize: 11 }} stroke={theme.palette.text.secondary} />
         <YAxis yAxisId="l" tick={{ fontSize: 11 }} stroke={theme.palette.text.secondary} width={46} tickFormatter={(v: number) => formatTonnes(v)} />
-        <YAxis yAxisId="r" orientation="right" tick={{ fontSize: 11 }} stroke={theme.palette.primary.main} width={42} tickFormatter={(v: number) => v.toFixed(2)} />
+        <YAxis yAxisId="r" orientation="right" tick={{ fontSize: 11 }} stroke={theme.palette.primary.main} width={48} tickFormatter={(v: number) => `${v}`} />
         <Tooltip
-          formatter={(v: number, n) => (n === 'intensity' ? [`${v.toFixed(3)} t/t`, 'CO₂ per tonne'] : [formatTonnes(v), 'CO₂e'])}
+          formatter={(v: number, n) => (n === 'intensity' ? [formatIntensity(v), 'Intensity'] : [formatTonnes(v), 'CO₂e'])}
           contentStyle={{ borderRadius: 10, fontSize: 12 }}
         />
         <Bar yAxisId="l" dataKey="co2eTonnes" fill={theme.palette.secondary.main} radius={[5, 5, 0, 0]} barSize={34} />

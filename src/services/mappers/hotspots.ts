@@ -12,21 +12,25 @@ function topGroups(
   labelFn: (s: Shipment) => string,
   limit = 8,
 ): HotspotRow[] {
-  const m = new Map<string, HotspotRow>();
+  const m = new Map<string, { key: string; label: string; co2e: number; weight: number; tonKm: number; shipments: number }>();
   for (const s of shipments) {
     const k = keyFn(s);
-    const g = m.get(k) ?? { key: k, label: labelFn(s), co2eTonnes: 0, weightTonnes: 0, shipments: 0, co2ePerTonne: 0 };
-    g.co2eTonnes += s.co2eTonnes;
-    g.weightTonnes += s.weightTonnes;
+    const g = m.get(k) ?? { key: k, label: labelFn(s), co2e: 0, weight: 0, tonKm: 0, shipments: 0 };
+    g.co2e += s.co2eTonnes;
+    g.weight += s.weightTonnes;
+    g.tonKm += s.weightTonnes * s.totalDistanceKm;
     g.shipments += 1;
     m.set(k, g);
   }
   return [...m.values()]
     .map((g) => ({
-      ...g,
-      co2eTonnes: round(g.co2eTonnes),
-      weightTonnes: round(g.weightTonnes),
-      co2ePerTonne: round(g.co2eTonnes / Math.max(g.weightTonnes, 0.001), 3),
+      key: g.key,
+      label: g.label,
+      co2eTonnes: round(g.co2e),
+      weightTonnes: round(g.weight),
+      shipments: g.shipments,
+      co2ePerTonne: round(g.co2e / Math.max(g.weight, 0.001), 3),
+      co2ePerTonneKm: round((g.co2e * 1e6) / Math.max(g.tonKm, 0.001), 1),
     }))
     .sort((a, b) => b.co2eTonnes - a.co2eTonnes)
     .slice(0, limit);

@@ -6,7 +6,7 @@ import { FilterPanel } from '@/components/filters/FilterPanel';
 import { KpiCard } from '@/components/cards/KpiCard';
 import { EquivalentsStrip } from '@/components/cards/EquivalentsStrip';
 import { ChartContainer } from '@/components/charts/ChartContainer';
-import { BarList } from '@/components/charts/BarList';
+import { IntensityRanking } from '@/components/charts/IntensityRanking';
 import { TreemapChart } from '@/components/charts/TreemapChart';
 import { YearOverYearChart } from '@/components/charts/YearOverYearChart';
 import { ModeTrendArea } from '@/components/charts/ModeTrendArea';
@@ -30,8 +30,6 @@ const DIMENSIONS: { key: HotspotDimension; label: string }[] = [
   { key: 'byVendor', label: 'Vendor / processor' },
   { key: 'byOrigin', label: 'Origin region' },
 ];
-const intensityFmt = (v: number) => `${v.toFixed(3)} t/t`;
-
 export default function HotspotsPage() {
   const ds = useDataSource();
   const persona = useAppSelector((s) => s.persona.current);
@@ -42,18 +40,17 @@ export default function HotspotsPage() {
   const [dimension, setDimension] = useState<HotspotDimension>('byCustomer');
   const rows = hotspots ? hotspots[dimension] : [];
 
-  // YoY deltas from the two most recent complete years (drop the partial current
-  // year so a half-year of data doesn't read as a huge drop).
+  // Progress vs the 2020 baseline (robust, and the reduction journey the program
+  // is measured against). Compare the latest complete year to the baseline year.
   const years = footprint?.byYear ?? [];
-  const fullYears = years.length >= 3 ? years.slice(0, -1) : years;
-  const latestY = fullYears[fullYears.length - 1];
-  const priorY = fullYears[fullYears.length - 2];
-  const yoyLabel = latestY && priorY ? `${latestY.year} vs ${priorY.year}` : undefined;
+  const latestY = years.length >= 2 ? years[years.length - 2] : years[years.length - 1]; // skip partial current year
+  const baseY = years[0];
+  const baseLabel = latestY && baseY && latestY.year !== baseY.year ? `vs ${baseY.year} baseline` : undefined;
   const pctChange = (cur?: number, prev?: number) => (prev ? ((cur! - prev) / prev) * 100 : undefined);
 
   const kpis: KpiMetric[] | undefined = footprint && [
-    { id: 'co2e', label: 'Annual downstream CO₂e', value: footprint.annualCo2eTonnes, unit: 'tonnes', display: `${formatTonnes(footprint.annualCo2eTonnes)}/yr`, intent: 'neutral', icon: 'co2e', deltaPct: pctChange(latestY?.co2eTonnes, priorY?.co2eTonnes), deltaLabel: yoyLabel, betterWhenLower: true, hint: `${footprint.shipmentCount} shipments` },
-    { id: 'intensity', label: 'CO₂ per ton-km', value: footprint.avgIntensity, unit: 'intensity', intent: 'neutral', icon: 'intensity', deltaPct: pctChange(latestY?.intensity, priorY?.intensity), deltaLabel: yoyLabel, betterWhenLower: true, hint: 'the core efficiency metric' },
+    { id: 'co2e', label: 'Annual downstream CO₂e', value: footprint.annualCo2eTonnes, unit: 'tonnes', display: `${formatTonnes(footprint.annualCo2eTonnes)}/yr`, intent: 'neutral', icon: 'co2e', hint: `${footprint.shipmentCount} shipments` },
+    { id: 'intensity', label: 'CO₂ per ton-km', value: footprint.avgIntensity, unit: 'intensity', intent: 'neutral', icon: 'intensity', deltaPct: pctChange(latestY?.intensity, baseY?.intensity), deltaLabel: baseLabel, betterWhenLower: true, hint: 'the core efficiency metric' },
     { id: 'top5', label: 'Top-5 customer share', value: footprint.top5CustomerSharePct, unit: 'percent', intent: footprint.top5CustomerSharePct > 50 ? 'risk' : 'neutral', icon: 'concentration', hint: 'concentration of CO₂e' },
     { id: 'air', label: 'Air CO₂e', value: footprint.airCo2eTonnes, unit: 'tonnes', display: formatTonnes(footprint.airCo2eTonnes), intent: 'risk', icon: 'air', hint: `${footprint.airExceptionCount} air shipments` },
   ];
@@ -105,10 +102,13 @@ export default function HotspotsPage() {
             {hotspots ? <TreemapChart data={rows.map((r) => ({ name: r.label, size: r.co2eTonnes, sub: `${r.shipments} shipments` }))} valueFormatter={formatTonnes} height={300} /> : <ChartSkeleton height={300} />}
           </Box>
           <Box>
-            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>CO₂ per ton-km (least efficient first)</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>CO₂e per tonne-km · least efficient first</Typography>
             <Box sx={{ mt: 1.5 }}>
               {hotspots ? (
-                <BarList items={[...rows].sort((a, b) => b.co2ePerTonne - a.co2ePerTonne).map((r) => ({ label: r.label, value: r.co2ePerTonne, sub: `${formatTonnes(r.co2eTonnes)} · ${r.shipments} shipments` }))} valueFormatter={intensityFmt} color="#9C6B3E" />
+                <IntensityRanking
+                  items={[...rows].sort((a, b) => b.co2ePerTonneKm - a.co2ePerTonneKm).map((r) => ({ label: r.label, value: r.co2ePerTonneKm, sub: `${formatTonnes(r.co2eTonnes)} · ${r.shipments} shipments` }))}
+                  avg={footprint?.avgIntensity}
+                />
               ) : <ChartSkeleton height={260} />}
             </Box>
           </Box>

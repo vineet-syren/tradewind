@@ -28,6 +28,10 @@ export function buildFootprint(
 ): Footprint {
   const totalCo2eTonnes = shipments.reduce((s, x) => s + x.co2eTonnes, 0);
   const totalWeightTonnes = shipments.reduce((s, x) => s + x.weightTonnes, 0);
+  // Tonne-kilometres (transport activity) — the denominator for true intensity.
+  const totalTonKm = shipments.reduce((s, x) => s + x.weightTonnes * x.totalDistanceKm, 0);
+  // g CO₂e per tonne-km = (tonnes × 1e6 g) / (tonne-km).
+  const gPerTonneKm = (co2eT: number, tonKm: number) => round((co2eT * 1e6) / Math.max(tonKm, 0.001), 1);
   // Annualize by the actual month span (handles partial latest year correctly).
   const months = new Set(shipments.map((s) => s.period));
   const yearsCovered = Math.max(1, months.size / 12);
@@ -48,15 +52,16 @@ export function buildFootprint(
   });
 
   // Year-over-year (CO₂e + intensity per calendar year).
-  const yearAgg = new Map<number, { co2e: number; weight: number }>();
+  const yearAgg = new Map<number, { co2e: number; weight: number; tonKm: number }>();
   for (const s of shipments) {
-    const g = yearAgg.get(s.year) ?? { co2e: 0, weight: 0 };
+    const g = yearAgg.get(s.year) ?? { co2e: 0, weight: 0, tonKm: 0 };
     g.co2e += s.co2eTonnes;
     g.weight += s.weightTonnes;
+    g.tonKm += s.weightTonnes * s.totalDistanceKm;
     yearAgg.set(s.year, g);
   }
   const byYear: YearPoint[] = [...yearAgg.entries()]
-    .map(([year, g]) => ({ year, co2eTonnes: round(g.co2e, 1), weightTonnes: round(g.weight, 1), intensity: round(g.co2e / Math.max(g.weight, 0.001), 3) }))
+    .map(([year, g]) => ({ year, co2eTonnes: round(g.co2e, 1), weightTonnes: round(g.weight, 1), intensity: gPerTonneKm(g.co2e, g.tonKm) }))
     .sort((a, b) => a.year - b.year);
 
   // By destination region.
@@ -91,7 +96,7 @@ export function buildFootprint(
     totalCo2eTonnes: round(totalCo2eTonnes, 1),
     annualCo2eTonnes: round(annualCo2eTonnes, 1),
     totalWeightTonnes: round(totalWeightTonnes, 1),
-    avgIntensity: round(totalCo2eTonnes / Math.max(totalWeightTonnes, 0.001), 3),
+    avgIntensity: gPerTonneKm(totalCo2eTonnes, totalTonKm),
     shipmentCount: shipments.length,
     laneCount: scopedLanes.length,
     modeSplit,
