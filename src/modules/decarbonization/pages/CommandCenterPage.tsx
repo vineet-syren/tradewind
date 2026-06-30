@@ -20,6 +20,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { ScopeNote } from '@/components/layout/ScopeNote';
 import { FilterPanel } from '@/components/filters/FilterPanel';
 import { KpiCard } from '@/components/cards/KpiCard';
+import { EquivalentsStrip } from '@/components/cards/EquivalentsStrip';
 import { ChartContainer } from '@/components/charts/ChartContainer';
 import { ModeSplitDonut } from '@/components/charts/ModeSplitDonut';
 import { KpiSkeleton, ChartSkeleton } from '@/components/loaders/Skeletons';
@@ -210,6 +211,8 @@ export default function CommandCenterPage() {
               )}
             </Box>
           </Box>
+
+          {footprint && <EquivalentsStrip tonnes={footprint.annualCo2eTonnes} />}
 
           <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', lg: '1.6fr 1fr' } }}>
             <Stack spacing={2.5}>

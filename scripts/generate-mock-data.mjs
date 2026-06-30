@@ -265,10 +265,13 @@ const LSPS = [
 ];
 
 // Origin port selection by destination region (which Indian gateway is used).
+// Mainland-coast gateways only — Mundra sits inside the Gulf of Kachchh, so a
+// straight inland road leg to it would skim the sea; excluded so road/rail legs
+// stay over land.
 const PORT_BY_REGION = {
-  Americas: ['Nhava Sheva', 'Mundra', 'Chennai'],
-  Europe: ['Nhava Sheva', 'Mundra'],
-  'Middle East': ['Nhava Sheva', 'Mundra'],
+  Americas: ['Nhava Sheva', 'Chennai'],
+  Europe: ['Nhava Sheva'],
+  'Middle East': ['Nhava Sheva'],
   APAC: ['Chennai', 'Visakhapatnam', 'Nhava Sheva'],
 };
 // The nearest/greener gateway we'd recommend per origin (cuts inland km).

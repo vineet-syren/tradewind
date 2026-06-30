@@ -6,6 +6,8 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { KpiCard } from '@/components/cards/KpiCard';
 import { ChartContainer } from '@/components/charts/ChartContainer';
 import { ReductionTrendChart } from '@/components/charts/ReductionTrendChart';
+import { YearOverYearChart } from '@/components/charts/YearOverYearChart';
+import { EquivalentsStrip } from '@/components/cards/EquivalentsStrip';
 import { KpiSkeleton, ChartSkeleton } from '@/components/loaders/Skeletons';
 import { useDataSource } from '@/hooks/useDataSource';
 import { useAsync } from '@/hooks/useAsync';
@@ -17,6 +19,7 @@ export default function EvidencePackPage() {
   const ds = useDataSource();
   const decisions = useAppSelector((s) => s.actions.decisions);
   const { data: ev } = useAsync(() => ds.getEvidence(), []);
+  const { data: footprint } = useAsync(() => ds.getFootprint(), []);
   const [toast, setToast] = useState<string | null>(null);
 
   const kpis: KpiMetric[] | undefined = ev && [
@@ -69,6 +72,13 @@ export default function EvidencePackPage() {
             </CardContent>
           </Card>
         </Stack>
+      </Box>
+
+      <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', lg: '1.5fr 1fr' }, mt: 3 }}>
+        <ChartContainer title="Year-over-year" subtitle="Total CO₂e (bars) vs CO₂ per-tonne intensity (line) — growth separated from efficiency">
+          {footprint ? <YearOverYearChart data={footprint.byYear} height={260} /> : <ChartSkeleton height={260} />}
+        </ChartContainer>
+        {footprint && <EquivalentsStrip tonnes={footprint.annualCo2eTonnes} title={`Annual footprint (${formatTonnes(footprint.annualCo2eTonnes)}/yr) in tangible terms`} />}
       </Box>
 
       {ev && (

@@ -16,9 +16,9 @@ import { formatTonnes } from '@/utils/format';
 
 const SCEN_TABS: { key: keyof LaneDetail['scenarios']; label: string }[] = [
   { key: 'current', label: 'Current' },
-  { key: 'balanced', label: 'Balanced' },
   { key: 'best', label: 'Best for CO₂' },
-  { key: 'optimal', label: 'Optimal' },
+  { key: 'balanced', label: 'Balanced' },
+  { key: 'optimal', label: 'Fastest' },
 ];
 
 export function LaneDetailContent({ laneId, onToast }: { laneId: string; onToast: (m: string) => void }) {
@@ -74,8 +74,8 @@ export function LaneDetailContent({ laneId, onToast }: { laneId: string; onToast
 
       <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' } }}>
         <ScenarioCard scenario={lane.scenarios.current} />
-        <ScenarioCard scenario={lane.scenarios.balanced} recommended={lane.recommendedApproach === 'balanced'} onAdopt={() => adopt(lane.scenarios.balanced)} />
         <ScenarioCard scenario={lane.scenarios.best} recommended={lane.recommendedApproach === 'best_co2'} onAdopt={() => adopt(lane.scenarios.best)} />
+        <ScenarioCard scenario={lane.scenarios.balanced} recommended={lane.recommendedApproach === 'balanced'} onAdopt={() => adopt(lane.scenarios.balanced)} />
         <ScenarioCard scenario={lane.scenarios.optimal} onAdopt={() => adopt(lane.scenarios.optimal)} />
       </Box>
 

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Box, Button, Stack, Typography } from '@mui/material';
+import { Box, Button, IconButton, Stack, Typography } from '@mui/material';
 import { alpha, useTheme } from '@mui/material/styles';
 import LayersClearRoundedIcon from '@mui/icons-material/LayersClearRounded';
+import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
+import RouteRoundedIcon from '@mui/icons-material/RouteRounded';
 import { MapContainer, TileLayer, Polyline, CircleMarker, Marker, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -18,19 +20,20 @@ const VEH_LABEL: Record<string, string> = { Ocean: 'vessels', Air: 'flights', Ra
 const WORLD_BOUNDS: [[number, number], [number, number]] = [[-74, -179], [83, 179]];
 const NO_LEGS: Leg[] = [];
 
-/** Elevated mode badge with an optional ×N vehicle-count chip (pseudo-3D). */
+/** Large mode glyph (no circle) with a vehicle-count badge when more than one. */
 function badgeIcon(mode: string, big = false, count = 1) {
   const color = MODE_COLORS[mode] ?? '#666';
-  const size = big ? 30 : 20;
+  const glyph = big ? 30 : 22;
+  const box = glyph + 14;
   const countChip =
     count > 1
-      ? `<span style="position:absolute;top:-7px;right:-9px;min-width:16px;height:16px;padding:0 3px;border-radius:8px;background:#0B1F2A;color:#fff;font-size:9.5px;font-weight:700;display:flex;align-items:center;justify-content:center;border:1.5px solid #fff;box-shadow:0 1px 2px rgba(0,0,0,.3)">×${count}</span>`
+      ? `<span style="position:absolute;top:0;right:-2px;min-width:18px;height:18px;padding:0 3px;border-radius:9px;background:${color};color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.45)">${count}</span>`
       : '';
   return L.divIcon({
     className: '',
-    html: `<div class="tw-badge" style="position:relative;width:${size}px;height:${size}px;border-radius:50%;background:#fff;border:2px solid ${color};display:flex;align-items:center;justify-content:center;font-size:${big ? 15 : 11}px">${MODE_EMOJI[mode] ?? '•'}${countChip}</div>`,
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
+    html: `<div style="position:relative;width:${box}px;height:${box}px;display:flex;align-items:center;justify-content:center;font-size:${glyph}px;line-height:1;filter:drop-shadow(0 2px 3px rgba(11,31,42,.55))">${MODE_EMOJI[mode] ?? '•'}${countChip}</div>`,
+    iconSize: [box, box],
+    iconAnchor: [box / 2, box / 2],
   });
 }
 
@@ -83,6 +86,7 @@ export function WorldMap({
   const dark = theme.palette.mode === 'dark';
   const ds = useDataSource();
   const [hoverId, setHoverId] = useState<string | null>(null);
+  const [summaryOpen, setSummaryOpen] = useState(true);
   const { data: detail } = useAsync(
     () => (selectedLaneId ? ds.getLane(selectedLaneId) : Promise.resolve(null)),
     [selectedLaneId],
@@ -111,7 +115,9 @@ export function WorldMap({
       legs.map((leg, i) => ({
         leg,
         i,
-        path: leg.mode === 'ocean' ? oceanRoute(leg.to, leg.fromCoord, leg.toCoord) : landCurve(leg.fromCoord, leg.toCoord, leg.mode === 'air' ? 0.28 : 0.14),
+        // Road/rail run straight between land points (bow 0) so they never bow
+        // out over water; air keeps a curved arc.
+        path: leg.mode === 'ocean' ? oceanRoute(leg.to, leg.fromCoord, leg.toCoord) : landCurve(leg.fromCoord, leg.toCoord, leg.mode === 'air' ? 0.28 : 0),
       })),
     [legs],
   );
@@ -212,27 +218,30 @@ export function WorldMap({
               <Polyline key={`mn-${i}`} positions={path} className="tw-route-glow" pathOptions={{ color: MODE_COLORS[leg.modeLabel] ?? '#666', weight: 5, opacity: 0.95, lineCap: 'round', dashArray: leg.mode === 'air' ? '2 8' : undefined }} />
             ))}
           {isolated && isoLegs.map(({ i, path }) => <Polyline key={`fl-${i}`} positions={path} className="tw-route-animated" pathOptions={{ color: '#fff', weight: 2, opacity: 0.85 }} />)}
+          {/* Mode badges with ×N vehicle count; leg metrics on hover (keeps the map clean) */}
           {isolated &&
             isoLegs.map(({ leg, i, path }) => (
-              <Marker key={`bd-${i}`} position={midOf(path)} icon={badgeIcon(leg.modeLabel, true, leg.vehicleCount)} interactive={false}>
-                <Tooltip permanent direction="top" offset={[0, -6]} className="tw-chip">
-                  <strong>{legStatus(leg, i, legs.length)}</strong>
-                  <br />
-                  <span style={{ fontWeight: 400, color: '#5C6B72' }}>
-                    {formatTonnes(leg.co2eTonnes)} · {formatDistance(leg.distanceKm)} · {formatLitres(leg.fuelLitres)} {leg.fuelType}
-                  </span>
-                  <br />
-                  <span style={{ fontWeight: 400, color: '#5C6B72' }}>
+              <Marker key={`bd-${i}`} position={midOf(path)} icon={badgeIcon(leg.modeLabel, true, leg.vehicleCount)}>
+                <Tooltip direction="top" offset={[0, -10]} className="tw-chip">
+                  <div style={{ fontWeight: 700, fontSize: 12 }}>{legStatus(leg, i, legs.length)}</div>
+                  <div style={{ fontWeight: 800, fontSize: 17, lineHeight: 1.15, color: MODE_COLORS[leg.modeLabel] ?? '#0B1F2A' }}>
+                    {formatTonnes(leg.co2eTonnes)} CO₂e
+                  </div>
+                  <div style={{ fontSize: 11.5, color: '#5C6B72', marginTop: 2 }}>
+                    {formatDistance(leg.distanceKm)} · {formatLitres(leg.fuelLitres)} {leg.fuelType}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: '#5C6B72' }}>
                     {leg.vehicleCount > 1 ? `${leg.vehicleCount} ${VEH_LABEL[leg.modeLabel]} · ` : ''}
                     {leg.transitDaysActual}d taken · {leg.transitDaysExpected}d planned
-                  </span>
+                  </div>
                 </Tooltip>
               </Marker>
             ))}
+          {/* Origin & destination names stay pinned; intermediate ports show on hover */}
           {isolated &&
             waypoints.map((w, i) => (
-              <Marker key={`wp-${i}`} position={w.pt} icon={pinIcon(w.kind)} interactive={false}>
-                <Tooltip permanent direction="top" offset={[0, -31]} className="tw-place">
+              <Marker key={`wp-${i}`} position={w.pt} icon={pinIcon(w.kind)} interactive={w.kind === 'port'}>
+                <Tooltip permanent={w.kind !== 'port'} direction="top" offset={[0, -31]} className="tw-place">
                   {w.name}
                   {w.kind === 'origin' ? ' · Origin' : w.kind === 'dest' ? ' · Destination' : ' · Port'}
                 </Tooltip>
@@ -240,11 +249,28 @@ export function WorldMap({
             ))}
         </MapContainer>
 
-        {isolated && detail && totals && (
+        {/* Collapsible end-to-end summary (so it never blocks the route) */}
+        {isolated && detail && totals && !summaryOpen && (
+          <Button
+            size="small"
+            variant="contained"
+            startIcon={<RouteRoundedIcon />}
+            onClick={() => setSummaryOpen(true)}
+            sx={{ position: 'absolute', top: 12, right: 12, zIndex: 1000, boxShadow: 3 }}
+          >
+            Route summary
+          </Button>
+        )}
+        {isolated && detail && totals && summaryOpen && (
           <Box sx={{ position: 'absolute', top: 12, right: 12, zIndex: 1000, p: 1.5, maxWidth: 264, borderRadius: 1.5, bgcolor: alpha(theme.palette.background.paper, 0.96), border: 1, borderColor: 'divider', boxShadow: 3 }}>
-            <Typography variant="caption" color="primary.main" sx={{ fontWeight: 700, letterSpacing: '0.04em' }}>
-              END-TO-END ROUTE
-            </Typography>
+            <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+              <Typography variant="caption" color="primary.main" sx={{ fontWeight: 700, letterSpacing: '0.04em' }}>
+                END-TO-END ROUTE
+              </Typography>
+              <IconButton size="small" onClick={() => setSummaryOpen(false)} sx={{ mt: -0.5, mr: -0.5 }} aria-label="Collapse summary">
+                <CloseRoundedIcon sx={{ fontSize: 16 }} />
+              </IconButton>
+            </Stack>
             <Typography variant="subtitle2" sx={{ fontWeight: 700, lineHeight: 1.25 }}>
               {detail.origin} → {detail.destCity}
             </Typography>

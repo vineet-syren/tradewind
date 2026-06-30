@@ -15,7 +15,7 @@ export function ScenarioCompareChart({
   const theme = useTheme();
   // The "Fastest" (air) bar can be ~100× the others, so cap it to a clean
   // integer domain and show its true value in the label (marked off-scale).
-  const order: Scenario[] = [scenarios.current, scenarios.optimal, scenarios.balanced, scenarios.best];
+  const order: Scenario[] = [scenarios.current, scenarios.best, scenarios.balanced, scenarios.optimal];
   const nonAirMax = Math.max(scenarios.current.co2eTonnes, scenarios.balanced.co2eTonnes, scenarios.best.co2eTonnes);
   const cap = Math.max(1, Math.ceil(nonAirMax * 2)); // clean integer top
   const rows = order.map((s) => ({

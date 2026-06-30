@@ -21,7 +21,7 @@ import type { ApproachKind, Lane, LaneDetail, Scenario } from '@/types';
 const ROUTE_COUNTS = [5, 8, 12, 16];
 type ListSortKey = 'reduction' | 'co2e' | 'shipments' | 'pct';
 const LIST_SORTS: { key: ListSortKey; label: string; value: (l: Lane) => number }[] = [
-  { key: 'reduction', label: 'Reduction potential', value: (l) => l.realizableReductionTonnes },
+  { key: 'reduction', label: 'Savings / yr', value: (l) => l.realizableReductionTonnes },
   { key: 'co2e', label: 'Total CO₂e', value: (l) => l.totalCo2eTonnes },
   { key: 'shipments', label: 'Shipment volume', value: (l) => l.shipmentCount },
   { key: 'pct', label: 'Reduction %', value: (l) => l.reductionPotentialPct },
@@ -125,7 +125,7 @@ export default function RouteModeDecisioningPage() {
           ) : (
             <Stack spacing={1.5} sx={{ maxHeight: 760, overflowY: 'auto', px: 0.5, py: 0.5 }}>
               {listLanes.map((l) => (
-                <LaneCard key={l.laneId} lane={l} selected={l.laneId === selectedId} onClick={() => setSelectedId(l.laneId)} />
+                <LaneCard key={l.laneId} lane={l} selected={l.laneId === selectedId} rankBy={listSort} onClick={() => setSelectedId(l.laneId)} />
               ))}
             </Stack>
           )}
@@ -151,9 +151,9 @@ export default function RouteModeDecisioningPage() {
 
 const LEG_TABS: { key: keyof LaneDetail['scenarios']; label: string }[] = [
   { key: 'current', label: 'Current' },
-  { key: 'balanced', label: 'Balanced' },
   { key: 'best', label: 'Best for CO₂' },
-  { key: 'optimal', label: 'Optimal' },
+  { key: 'balanced', label: 'Balanced' },
+  { key: 'optimal', label: 'Fastest' },
 ];
 
 function DecisionPanel({ laneId, onAdopt, onOpen360 }: { laneId: string; onAdopt: (m: string) => void; onOpen360: () => void }) {
@@ -209,8 +209,8 @@ function DecisionPanel({ laneId, onAdopt, onOpen360 }: { laneId: string; onAdopt
 
       <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' } }}>
         <ScenarioCard scenario={lane.scenarios.current} />
-        <ScenarioCard scenario={lane.scenarios.balanced} recommended={lane.recommendedApproach === 'balanced'} onAdopt={() => adopt(lane.scenarios.balanced)} />
         <ScenarioCard scenario={lane.scenarios.best} recommended={lane.recommendedApproach === 'best_co2'} onAdopt={() => adopt(lane.scenarios.best)} />
+        <ScenarioCard scenario={lane.scenarios.balanced} recommended={lane.recommendedApproach === 'balanced'} onAdopt={() => adopt(lane.scenarios.balanced)} />
         <ScenarioCard scenario={lane.scenarios.optimal} onAdopt={() => adopt(lane.scenarios.optimal)} />
       </Box>
 

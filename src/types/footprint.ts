@@ -14,6 +14,13 @@ export interface NamedShare {
   pct: number;
 }
 
+export interface YearPoint {
+  year: number;
+  co2eTonnes: number;
+  weightTonnes: number;
+  intensity: number;
+}
+
 /** Computed downstream-transportation footprint for the active scope. */
 export interface Footprint {
   totalCo2eTonnes: number;
@@ -24,6 +31,7 @@ export interface Footprint {
   laneCount: number;
   modeSplit: ModeSplitRow[];
   byRegion: NamedShare[];
+  byYear: YearPoint[];
   reductionOpportunityTonnes: number; // realizable
   reductionOpportunityPct: number;
   theoreticalReductionTonnes: number;

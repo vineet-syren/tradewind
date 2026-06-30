@@ -11,6 +11,7 @@ import type {
   ModeSplitRow,
   NamedShare,
   Shipment,
+  YearPoint,
 } from '@/types';
 
 const round = (n: number, dp = 1) => {
@@ -45,6 +46,18 @@ export function buildFootprint(
     const g = modeAgg.get(m)!;
     return { mode: m, co2eTonnes: round(g.co2e, 2), pct: round((g.co2e / Math.max(totalCo2eTonnes, 0.001)) * 100, 1), shipments: g.ships };
   });
+
+  // Year-over-year (CO₂e + intensity per calendar year).
+  const yearAgg = new Map<number, { co2e: number; weight: number }>();
+  for (const s of shipments) {
+    const g = yearAgg.get(s.year) ?? { co2e: 0, weight: 0 };
+    g.co2e += s.co2eTonnes;
+    g.weight += s.weightTonnes;
+    yearAgg.set(s.year, g);
+  }
+  const byYear: YearPoint[] = [...yearAgg.entries()]
+    .map(([year, g]) => ({ year, co2eTonnes: round(g.co2e, 1), weightTonnes: round(g.weight, 1), intensity: round(g.co2e / Math.max(g.weight, 0.001), 3) }))
+    .sort((a, b) => a.year - b.year);
 
   // By destination region.
   const regionAgg = new Map<string, number>();
@@ -83,6 +96,7 @@ export function buildFootprint(
     laneCount: scopedLanes.length,
     modeSplit,
     byRegion,
+    byYear,
     reductionOpportunityTonnes,
     reductionOpportunityPct,
     theoreticalReductionTonnes,
