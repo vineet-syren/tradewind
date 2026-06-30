@@ -62,6 +62,7 @@ const SORTERS: Record<string, (a: Shipment, b: Shipment) => number> = {
   reductionPotentialTonnes: (a, b) => a.reductionPotentialTonnes - b.reductionPotentialTonnes,
   totalDistanceKm: (a, b) => a.totalDistanceKm - b.totalDistanceKm,
   period: (a, b) => (a.period < b.period ? -1 : a.period > b.period ? 1 : 0),
+  date: (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0),
   customer: (a, b) => a.customer.localeCompare(b.customer),
 };
 

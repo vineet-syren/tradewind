@@ -12,6 +12,7 @@ import FactCheckRoundedIcon from '@mui/icons-material/FactCheckRounded';
 import FunctionsRoundedIcon from '@mui/icons-material/FunctionsRounded';
 import Inventory2RoundedIcon from '@mui/icons-material/Inventory2Rounded';
 import CalendarMonthRoundedIcon from '@mui/icons-material/CalendarMonthRounded';
+import ReceiptLongRoundedIcon from '@mui/icons-material/ReceiptLongRounded';
 import DirectionsBoatRoundedIcon from '@mui/icons-material/DirectionsBoatRounded';
 import TrainRoundedIcon from '@mui/icons-material/TrainRounded';
 import LocalShippingRoundedIcon from '@mui/icons-material/LocalShippingRounded';
@@ -24,6 +25,7 @@ const REGISTRY: Record<string, (p: SvgIconProps) => ReactElement> = {
   copilot: (p) => <AutoAwesomeRoundedIcon {...p} />,
   hotspots: (p) => <LocalFireDepartmentRoundedIcon {...p} />,
   decisioning: (p) => <AltRouteRoundedIcon {...p} />,
+  ledger: (p) => <ReceiptLongRoundedIcon {...p} />,
   lanes: (p) => <GridViewRoundedIcon {...p} />,
   partners: (p) => <Diversity3RoundedIcon {...p} />,
   actions: (p) => <BoltRoundedIcon {...p} />,

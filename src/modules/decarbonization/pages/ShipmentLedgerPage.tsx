@@ -1,0 +1,135 @@
+import { useMemo, useState } from 'react';
+import { Box, Card, CardContent, Chip, MenuItem, Stack, TextField, Typography } from '@mui/material';
+import ReceiptLongRounded from '@mui/icons-material/ReceiptLongRounded';
+import { PageHeader } from '@/components/layout/PageHeader';
+import { ScopeNote } from '@/components/layout/ScopeNote';
+import { FilterPanel } from '@/components/filters/FilterPanel';
+import { ChartContainer } from '@/components/charts/ChartContainer';
+import { DataTable, type Column } from '@/components/tables/DataTable';
+import { ModeIcon } from '@/components/layout/iconRegistry';
+import { ShipmentDetailDialog } from '@/components/shipments/ShipmentDetailDialog';
+import { TableSkeleton } from '@/components/loaders/Skeletons';
+import { useDataSource } from '@/hooks/useDataSource';
+import { useAsync } from '@/hooks/useAsync';
+import { useAppSelector } from '@/app/store/hooks';
+import type { Shipment } from '@/types';
+import { APP_TODAY } from '@/constants/app';
+import { formatTonnes, formatDistance, formatCurrency, formatNumber, formatWeightTonnes, formatDate } from '@/utils/format';
+
+const STATUS_COLOR: Record<string, 'success' | 'warning' | 'info' | 'default'> = {
+  Delivered: 'success',
+  'In transit': 'warning',
+  Planned: 'info',
+};
+const STATUSES = ['All', 'Delivered', 'In transit', 'Planned'] as const;
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <Box>
+      <Typography variant="caption" sx={{ color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.07em', fontSize: 10, display: 'block' }}>{label}</Typography>
+      <Typography variant="subtitle1" sx={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{value}</Typography>
+    </Box>
+  );
+}
+
+export default function ShipmentLedgerPage() {
+  const ds = useDataSource();
+  const persona = useAppSelector((s) => s.persona.current);
+  const filters = useAppSelector((s) => s.filters.value);
+  const { data: result, status } = useAsync(
+    () => ds.getShipments({ persona, ...filters, pageSize: 5000, sortBy: 'date', sortDir: 'desc' }),
+    [persona, filters],
+  );
+  const [statusFilter, setStatusFilter] = useState<(typeof STATUSES)[number]>('All');
+  const [selected, setSelected] = useState<string | null>(null);
+
+  const rows = useMemo(() => {
+    const items = result?.items ?? [];
+    return statusFilter === 'All' ? items : items.filter((s) => s.status === statusFilter);
+  }, [result, statusFilter]);
+
+  const totals = useMemo(() => {
+    const co2e = rows.reduce((a, s) => a + s.co2eTonnes, 0);
+    const weight = rows.reduce((a, s) => a + s.weightTonnes, 0);
+    const byStatus = rows.reduce<Record<string, number>>((acc, s) => ((acc[s.status] = (acc[s.status] ?? 0) + 1), acc), {});
+    return { co2e, weight, intensity: weight ? co2e / weight : 0, byStatus };
+  }, [rows]);
+
+  const period = filters.dateFrom || filters.dateTo
+    ? `${filters.dateFrom ? formatDate(filters.dateFrom) : 'start'} – ${filters.dateTo ? formatDate(filters.dateTo) : 'today'}`
+    : `All actuals through ${formatDate(APP_TODAY)}`;
+
+  const columns: Column<Shipment>[] = [
+    { key: 'date', header: 'Ship date', render: (s) => <Typography variant="body2" sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatDate(s.date)}</Typography>, sortValue: (s) => s.date },
+    { key: 'eta', header: 'ETA', render: (s) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDate(s.eta)}</span>, sortValue: (s) => s.eta },
+    { key: 'status', header: 'Status', render: (s) => <Chip size="small" color={STATUS_COLOR[s.status] ?? 'default'} label={s.status} />, sortValue: (s) => s.status },
+    { key: 'lane', header: 'Lane', render: (s) => <Typography variant="body2" sx={{ fontWeight: 600 }}>{s.origin} → {s.destPort}</Typography>, sortValue: (s) => s.origin },
+    { key: 'product', header: 'Product', render: (s) => s.productName, sortValue: (s) => s.productName },
+    { key: 'customer', header: 'Customer', render: (s) => s.customer, sortValue: (s) => s.customer },
+    { key: 'mode', header: 'Mode', render: (s) => <Stack direction="row" spacing={0.5} alignItems="center"><ModeIcon mode={s.primaryMode} fontSize="small" />{s.primaryMode}</Stack>, sortValue: (s) => s.primaryMode },
+    { key: 'weight', header: 'Weight', align: 'right', render: (s) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatWeightTonnes(s.weightTonnes)}</span>, sortValue: (s) => s.weightTonnes },
+    { key: 'distance', header: 'Distance', align: 'right', render: (s) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDistance(s.totalDistanceKm)}</span>, sortValue: (s) => s.totalDistanceKm },
+    { key: 'freight', header: 'Freight', align: 'right', render: (s) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatCurrency(s.freightUsd)}</span>, sortValue: (s) => s.freightUsd },
+    { key: 'co2e', header: 'CO₂e', align: 'right', render: (s) => <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{formatTonnes(s.co2eTonnes)}</strong>, sortValue: (s) => s.co2eTonnes },
+    { key: 'intensity', header: 't/t', align: 'right', render: (s) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{s.co2ePerTonne.toFixed(3)}</span>, sortValue: (s) => s.co2ePerTonne },
+    { key: 'carrier', header: 'Carrier', render: (s) => s.carrier, sortValue: (s) => s.carrier },
+  ];
+
+  return (
+    <Box>
+      <PageHeader
+        overline="Visibility · Shipment Ledger Agent"
+        title="Shipment Ledger"
+        subtitle="Every shipment, statement-style — newest first. Set the period in the date range, narrow with any filter, and click a row for the full breakdown."
+        actions={<ScopeNote />}
+      />
+      <FilterPanel />
+
+      {/* Statement summary */}
+      <Card sx={{ mb: 3 }}>
+        <CardContent sx={{ py: 2 }}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap gap={2}>
+            <Box>
+              <Typography variant="caption" sx={{ color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: 10 }}>Statement period</Typography>
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>{period}</Typography>
+            </Box>
+            <Stack direction="row" spacing={4} useFlexGap flexWrap="wrap">
+              <Stat label="Shipments" value={formatNumber(rows.length)} />
+              <Stat label="Total CO₂e" value={formatTonnes(totals.co2e)} />
+              <Stat label="Total weight" value={`${formatNumber(totals.weight)} t`} />
+              <Stat label="Avg intensity" value={`${totals.intensity.toFixed(3)} t/t`} />
+            </Stack>
+            <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
+              {(['Delivered', 'In transit', 'Planned'] as const).map((st) =>
+                totals.byStatus[st] ? <Chip key={st} size="small" variant="outlined" color={STATUS_COLOR[st]} label={`${st} ${totals.byStatus[st]}`} /> : null,
+              )}
+            </Stack>
+          </Stack>
+        </CardContent>
+      </Card>
+
+      <ChartContainer
+        title="Shipments"
+        subtitle="Ranked by ship date, newest first · click any row for legs, costs and route options"
+        icon={<ReceiptLongRounded sx={{ fontSize: 18 }} />}
+        action={
+          <TextField select size="small" label="Status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as (typeof STATUSES)[number])} sx={{ width: 150 }}>
+            {STATUSES.map((st) => <MenuItem key={st} value={st}>{st}</MenuItem>)}
+          </TextField>
+        }
+      >
+        {status === 'loading' || !result ? (
+          <TableSkeleton rows={10} />
+        ) : rows.length === 0 ? (
+          <Typography variant="body2" color="text.secondary" sx={{ py: 6, textAlign: 'center' }}>
+            No shipments match this period and filter set. Widen the date range or clear a filter.
+          </Typography>
+        ) : (
+          <DataTable columns={columns} rows={rows} getRowKey={(s) => s.shipmentId} onRowClick={(s) => setSelected(s.shipmentId)} initialSortKey="date" maxHeight={620} />
+        )}
+      </ChartContainer>
+
+      <ShipmentDetailDialog shipmentId={selected} onClose={() => setSelected(null)} />
+    </Box>
+  );
+}

@@ -19,6 +19,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
     heading: 'VISIBILITY',
     items: [
       { label: 'Shipment Route Map', to: '/decisioning', iconKey: 'decisioning' },
+      { label: 'Shipment Ledger', to: '/ledger', iconKey: 'ledger' },
       { label: 'Emission Hotspots', to: '/hotspots', iconKey: 'hotspots' },
       { label: 'Customer & Product Lanes', to: '/lanes', iconKey: 'lanes' },
       { label: 'Carrier & Vendor Performance', to: '/partners', iconKey: 'partners' },

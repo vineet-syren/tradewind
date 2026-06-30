@@ -22,6 +22,14 @@ export function formatTonnesFull(value: number): string {
   return `${numberFmt.format(Math.round(value))} t`;
 }
 
+/** Shipment weight in tonnes, keeping decimals for sub-ton (e.g. air) loads. */
+export function formatWeightTonnes(t: number): string {
+  const abs = Math.abs(t);
+  if (abs >= 100) return `${numberFmt.format(Math.round(t))} t`;
+  if (abs >= 1) return `${t.toFixed(1)} t`;
+  return `${t.toFixed(2)} t`;
+}
+
 export function formatCurrency(value: number): string {
   const abs = Math.abs(value);
   if (abs >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;

@@ -5,6 +5,7 @@ import { AppShell } from '@/components/layout/AppShell';
 // Route-level code splitting: each page is its own lazy chunk.
 const CommandCenterPage = lazy(() => import('@/modules/decarbonization/pages/CommandCenterPage'));
 const RouteModeDecisioningPage = lazy(() => import('@/modules/decarbonization/pages/RouteModeDecisioningPage'));
+const ShipmentLedgerPage = lazy(() => import('@/modules/decarbonization/pages/ShipmentLedgerPage'));
 const HotspotsPage = lazy(() => import('@/modules/decarbonization/pages/HotspotsPage'));
 const ProductCustomerLanesPage = lazy(() => import('@/modules/decarbonization/pages/ProductCustomerLanesPage'));
 const PartnerInfluencePage = lazy(() => import('@/modules/decarbonization/pages/PartnerInfluencePage'));
@@ -22,6 +23,7 @@ export function AppRouter() {
         <Route element={<AppShell />}>
           <Route path="/" element={<CommandCenterPage />} />
           <Route path="/decisioning" element={<RouteModeDecisioningPage />} />
+          <Route path="/ledger" element={<ShipmentLedgerPage />} />
           <Route path="/hotspots" element={<HotspotsPage />} />
           <Route path="/lanes" element={<ProductCustomerLanesPage />} />
           <Route path="/partners" element={<PartnerInfluencePage />} />
