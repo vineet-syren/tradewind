@@ -1,4 +1,4 @@
-import { Box, Card, CardContent, Chip, Typography } from '@mui/material';
+import { Box, Card, CardContent, Chip, Stack, Typography } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ScopeNote } from '@/components/layout/ScopeNote';
@@ -8,6 +8,10 @@ import { ChartContainer } from '@/components/charts/ChartContainer';
 import { ScatterBubbleChart, SwatchLegend, type BubblePoint } from '@/components/charts/ScatterBubbleChart';
 import { DataTable, type Column } from '@/components/tables/DataTable';
 import { KpiSkeleton, ChartSkeleton, TableSkeleton } from '@/components/loaders/Skeletons';
+import ScatterPlotRounded from '@mui/icons-material/ScatterPlotRounded';
+import GridViewRounded from '@mui/icons-material/GridViewRounded';
+import LocalShippingRounded from '@mui/icons-material/LocalShippingRounded';
+import FactoryRounded from '@mui/icons-material/FactoryRounded';
 import { useDataSource } from '@/hooks/useDataSource';
 import { useAsync } from '@/hooks/useAsync';
 import { useAppSelector } from '@/app/store/hooks';
@@ -30,10 +34,10 @@ export default function PartnerInfluencePage() {
     : 0;
 
   const kpis: KpiMetric[] | undefined = partners && [
-    { id: 'infl', label: 'Influenceable saving', value: influenceable ?? 0, unit: 'tonnes', display: `${formatTonnes(influenceable ?? 0)}/yr`, intent: 'opportunity', hint: 'via carrier & vendor levers' },
-    { id: 'green', label: 'Green-fleet share', value: greenShare, unit: 'percent', intent: greenShare > 50 ? 'positive' : 'neutral', hint: 'of carrier CO₂e' },
-    { id: 'worst', label: 'Highest-intensity carrier', value: worstLsp ? Math.round((worstLsp.intensityIndex - 1) * 100) : 0, unit: 'percent', display: worstLsp ? `+${Math.round((worstLsp.intensityIndex - 1) * 100)}%` : '—', intent: 'risk', hint: worstLsp?.name },
-    { id: 'partners', label: 'Active partners', value: (partners.lsps.length + partners.vendors.length), unit: 'number', intent: 'neutral', hint: `${partners.lsps.length} carriers · ${partners.vendors.length} vendors` },
+    { id: 'infl', label: 'Influenceable saving', value: influenceable ?? 0, unit: 'tonnes', display: `${formatTonnes(influenceable ?? 0)}/yr`, intent: 'opportunity', icon: 'savings', hint: 'via carrier & vendor levers' },
+    { id: 'green', label: 'Green-fleet share', value: greenShare, unit: 'percent', intent: greenShare > 50 ? 'positive' : 'neutral', icon: 'green', hint: 'of carrier CO₂e' },
+    { id: 'worst', label: 'Highest-intensity carrier', value: worstLsp ? Math.round((worstLsp.intensityIndex - 1) * 100) : 0, unit: 'percent', display: worstLsp ? `+${Math.round((worstLsp.intensityIndex - 1) * 100)}%` : '—', intent: 'risk', icon: 'carrier', hint: worstLsp?.name },
+    { id: 'partners', label: 'Active partners', value: (partners.lsps.length + partners.vendors.length), unit: 'number', intent: 'neutral', icon: 'partners', hint: `${partners.lsps.length} carriers · ${partners.vendors.length} vendors` },
   ];
 
   const carrierPoints: BubblePoint[] = (partners?.lsps ?? []).map((l) => ({
@@ -87,7 +91,7 @@ export default function PartnerInfluencePage() {
 
       {/* Carriers: benchmark scatter + detail table */}
       <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', lg: '1.4fr 1fr' }, mb: 3 }}>
-        <ChartContainer title="Carrier benchmark" subtitle="Volume (CO₂e) vs fleet intensity · bubble = shipments · right of the line = above fleet average">
+        <ChartContainer title="Carrier benchmark" subtitle="Volume (CO₂e) vs fleet intensity · bubble = shipments · right of the line = above fleet average" icon={<ScatterPlotRounded sx={{ fontSize: 18 }} />}>
           {partners ? (
             <>
               <ScatterBubbleChart points={carrierPoints} xLabel="Fleet intensity (1.0 = avg)" yLabel="CO₂e" sizeLabel="Shipments" xFormat={(v) => `${v.toFixed(2)}×`} yFormat={formatTonnes} refX={1} refXLabel="fleet avg" height={300} />
@@ -97,7 +101,10 @@ export default function PartnerInfluencePage() {
         </ChartContainer>
         <Card>
           <CardContent>
-            <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>Carriers</Typography>
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
+              <LocalShippingRounded sx={{ fontSize: 18, color: 'primary.main' }} />
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Carriers</Typography>
+            </Stack>
             {status === 'loading' || !partners ? <TableSkeleton rows={5} /> : <DataTable columns={lspCols} rows={partners.lsps} getRowKey={(l) => l.name} initialSortKey="co2e" />}
           </CardContent>
         </Card>
@@ -105,7 +112,7 @@ export default function PartnerInfluencePage() {
 
       {/* Vendors: controllability matrix + detail table */}
       <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', lg: '1.4fr 1fr' } }}>
-        <ChartContainer title="Vendor governance matrix" subtitle="Emissions vs controllability · bubble = influenceable saving · top-left = high impact, harder to control (govern first)">
+        <ChartContainer title="Vendor governance matrix" subtitle="Emissions vs controllability · bubble = influenceable saving · top-left = high impact, harder to control (govern first)" icon={<GridViewRounded sx={{ fontSize: 18 }} />}>
           {partners ? (
             <>
               <ScatterBubbleChart points={vendorPoints} xLabel="Controllability" yLabel="CO₂e" sizeLabel="Influenceable / yr" xFormat={(v) => ['', 'Low', 'Medium', 'High'][v] ?? ''} yFormat={formatTonnes} xDomain={[0.5, 3.5]} height={300} />
@@ -115,7 +122,10 @@ export default function PartnerInfluencePage() {
         </ChartContainer>
         <Card>
           <CardContent>
-            <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>Vendors / processors</Typography>
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
+              <FactoryRounded sx={{ fontSize: 18, color: 'primary.main' }} />
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Vendors / processors</Typography>
+            </Stack>
             {status === 'loading' || !partners ? <TableSkeleton rows={5} /> : <DataTable columns={vendorCols} rows={partners.vendors} getRowKey={(v) => v.name} initialSortKey="co2e" />}
           </CardContent>
         </Card>

@@ -72,7 +72,7 @@ export function ScatterBubbleChart({
             <Label value={refXLabel} position="top" style={{ fontSize: 10, fill: theme.palette.text.secondary }} />
           </ReferenceLine>
         )}
-        <Scatter data={points} fillOpacity={0.78}>
+        <Scatter data={points} fillOpacity={0.78} isAnimationActive={false}>
           {points.map((p, i) => (
             <Cell key={i} fill={p.color} />
           ))}

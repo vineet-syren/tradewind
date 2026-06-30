@@ -11,6 +11,9 @@ import { TreemapChart } from '@/components/charts/TreemapChart';
 import { YearOverYearChart } from '@/components/charts/YearOverYearChart';
 import { ModeTrendArea } from '@/components/charts/ModeTrendArea';
 import { KpiSkeleton, ChartSkeleton } from '@/components/loaders/Skeletons';
+import ShowChartRounded from '@mui/icons-material/ShowChartRounded';
+import LayersRounded from '@mui/icons-material/LayersRounded';
+import TravelExploreRounded from '@mui/icons-material/TravelExploreRounded';
 import { useDataSource } from '@/hooks/useDataSource';
 import { useAsync } from '@/hooks/useAsync';
 import { useAppSelector } from '@/app/store/hooks';
@@ -39,11 +42,20 @@ export default function HotspotsPage() {
   const [dimension, setDimension] = useState<HotspotDimension>('byCustomer');
   const rows = hotspots ? hotspots[dimension] : [];
 
+  // YoY deltas from the two most recent complete years (drop the partial current
+  // year so a half-year of data doesn't read as a huge drop).
+  const years = footprint?.byYear ?? [];
+  const fullYears = years.length >= 3 ? years.slice(0, -1) : years;
+  const latestY = fullYears[fullYears.length - 1];
+  const priorY = fullYears[fullYears.length - 2];
+  const yoyLabel = latestY && priorY ? `${latestY.year} vs ${priorY.year}` : undefined;
+  const pctChange = (cur?: number, prev?: number) => (prev ? ((cur! - prev) / prev) * 100 : undefined);
+
   const kpis: KpiMetric[] | undefined = footprint && [
-    { id: 'co2e', label: 'Annual downstream CO₂e', value: footprint.annualCo2eTonnes, unit: 'tonnes', display: `${formatTonnes(footprint.annualCo2eTonnes)}/yr`, intent: 'neutral', hint: `${footprint.shipmentCount} shipments` },
-    { id: 'intensity', label: 'CO₂ per ton-km', value: footprint.avgIntensity, unit: 'intensity', intent: 'neutral', hint: 'the core efficiency metric' },
-    { id: 'top5', label: 'Top-5 customer share', value: footprint.top5CustomerSharePct, unit: 'percent', intent: footprint.top5CustomerSharePct > 50 ? 'risk' : 'neutral', hint: 'concentration of CO₂e' },
-    { id: 'air', label: 'Air CO₂e', value: footprint.airCo2eTonnes, unit: 'tonnes', display: formatTonnes(footprint.airCo2eTonnes), intent: 'risk', hint: `${footprint.airExceptionCount} air shipments` },
+    { id: 'co2e', label: 'Annual downstream CO₂e', value: footprint.annualCo2eTonnes, unit: 'tonnes', display: `${formatTonnes(footprint.annualCo2eTonnes)}/yr`, intent: 'neutral', icon: 'co2e', deltaPct: pctChange(latestY?.co2eTonnes, priorY?.co2eTonnes), deltaLabel: yoyLabel, betterWhenLower: true, hint: `${footprint.shipmentCount} shipments` },
+    { id: 'intensity', label: 'CO₂ per ton-km', value: footprint.avgIntensity, unit: 'intensity', intent: 'neutral', icon: 'intensity', deltaPct: pctChange(latestY?.intensity, priorY?.intensity), deltaLabel: yoyLabel, betterWhenLower: true, hint: 'the core efficiency metric' },
+    { id: 'top5', label: 'Top-5 customer share', value: footprint.top5CustomerSharePct, unit: 'percent', intent: footprint.top5CustomerSharePct > 50 ? 'risk' : 'neutral', icon: 'concentration', hint: 'concentration of CO₂e' },
+    { id: 'air', label: 'Air CO₂e', value: footprint.airCo2eTonnes, unit: 'tonnes', display: formatTonnes(footprint.airCo2eTonnes), intent: 'risk', icon: 'air', hint: `${footprint.airExceptionCount} air shipments` },
   ];
 
   return (
@@ -66,10 +78,10 @@ export default function HotspotsPage() {
 
       {/* Trends */}
       <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, mb: 3 }}>
-        <ChartContainer title="Year-over-year" subtitle="Total CO₂e (bars) vs CO₂ per-tonne intensity (line)">
+        <ChartContainer title="Year-over-year" subtitle="Total CO₂e (bars) vs CO₂ per-tonne intensity (line)" icon={<ShowChartRounded sx={{ fontSize: 18 }} />}>
           {footprint ? <YearOverYearChart data={footprint.byYear} /> : <ChartSkeleton height={260} />}
         </ChartContainer>
-        <ChartContainer title="Emissions by mode over time" subtitle="Stacked monthly CO₂e — watch the air band">
+        <ChartContainer title="Emissions by mode over time" subtitle="Stacked monthly CO₂e — watch the air band" icon={<LayersRounded sx={{ fontSize: 18 }} />}>
           {hotspots ? <ModeTrendArea data={hotspots.monthlyByMode} /> : <ChartSkeleton height={260} />}
         </ChartContainer>
       </Box>
@@ -78,6 +90,7 @@ export default function HotspotsPage() {
       <ChartContainer
         title="Explore emissions by dimension"
         subtitle="Pick a lens — see where CO₂e concentrates and which are least efficient (CO₂ per ton-km)"
+        icon={<TravelExploreRounded sx={{ fontSize: 18 }} />}
         action={
           <TextField select size="small" label="View by" value={dimension} onChange={(e) => setDimension(e.target.value as HotspotDimension)} sx={{ width: 190 }}>
             {DIMENSIONS.map((d) => (
