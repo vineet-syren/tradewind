@@ -18,8 +18,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
   {
     heading: 'VISIBILITY',
     items: [
-      { label: 'Shipment Route Map', to: '/decisioning', iconKey: 'decisioning' },
-      { label: 'Shipment Ledger', to: '/ledger', iconKey: 'ledger' },
+      { label: 'Shipment Atlas', to: '/shipments', iconKey: 'atlas' },
       { label: 'Emission Hotspots', to: '/hotspots', iconKey: 'hotspots' },
       { label: 'Customer & Product Lanes', to: '/lanes', iconKey: 'lanes' },
       { label: 'Carrier & Vendor Performance', to: '/partners', iconKey: 'partners' },
@@ -28,8 +27,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
   {
     heading: 'REDUCE',
     items: [
-      { label: 'Shipment Planner', to: '/scheduler', iconKey: 'scheduler' },
-      { label: 'Reduction Opportunities', to: '/recommendations', iconKey: 'recommendations' },
+      { label: 'Reduction Planner', to: '/planner', iconKey: 'scheduler' },
       { label: 'Action Tracker', to: '/actions', iconKey: 'actions' },
     ],
   },

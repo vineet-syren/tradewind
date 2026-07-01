@@ -1,9 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Box, Card, CardContent, Chip, MenuItem, Stack, TextField, Typography } from '@mui/material';
 import ReceiptLongRounded from '@mui/icons-material/ReceiptLongRounded';
-import { PageHeader } from '@/components/layout/PageHeader';
-import { ScopeNote } from '@/components/layout/ScopeNote';
-import { FilterPanel } from '@/components/filters/FilterPanel';
 import { ChartContainer } from '@/components/charts/ChartContainer';
 import { DataTable, type Column } from '@/components/tables/DataTable';
 import { ModeIcon } from '@/components/layout/iconRegistry';
@@ -32,7 +29,12 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-export default function ShipmentLedgerPage() {
+/**
+ * The shipment register — statement-style, newest first, filterable by the
+ * global period + filters plus a local status. A row click opens the full
+ * breakdown and (optionally) tells the parent to isolate that route on the map.
+ */
+export function ShipmentLedgerSection({ onRowSelect }: { onRowSelect?: (s: Shipment) => void }) {
   const ds = useDataSource();
   const persona = useAppSelector((s) => s.persona.current);
   const filters = useAppSelector((s) => s.filters.value);
@@ -78,16 +80,7 @@ export default function ShipmentLedgerPage() {
 
   return (
     <Box>
-      <PageHeader
-        overline="Visibility · Shipment Ledger Agent"
-        title="Shipment Ledger"
-        subtitle="Every shipment, statement-style — newest first. Set the period in the date range, narrow with any filter, and click a row for the full breakdown."
-        actions={<ScopeNote />}
-      />
-      <FilterPanel />
-
-      {/* Statement summary */}
-      <Card sx={{ mb: 3 }}>
+      <Card sx={{ mb: 2.5 }}>
         <CardContent sx={{ py: 2 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap gap={2}>
             <Box>
@@ -110,8 +103,8 @@ export default function ShipmentLedgerPage() {
       </Card>
 
       <ChartContainer
-        title="Shipments"
-        subtitle="Ranked by ship date, newest first · click any row for legs, costs and route options"
+        title="Shipment register"
+        subtitle="Every shipment, newest first · click a row to trace its route on the map and see the full breakdown"
         icon={<ReceiptLongRounded sx={{ fontSize: 18 }} />}
         action={
           <TextField select size="small" label="Status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as (typeof STATUSES)[number])} sx={{ width: 150 }}>
@@ -126,7 +119,14 @@ export default function ShipmentLedgerPage() {
             No shipments match this period and filter set. Widen the date range or clear a filter.
           </Typography>
         ) : (
-          <DataTable columns={columns} rows={rows} getRowKey={(s) => s.shipmentId} onRowClick={(s) => setSelected(s.shipmentId)} initialSortKey="date" maxHeight={620} />
+          <DataTable
+            columns={columns}
+            rows={rows}
+            getRowKey={(s) => s.shipmentId}
+            onRowClick={(s) => { setSelected(s.shipmentId); onRowSelect?.(s); }}
+            initialSortKey="date"
+            maxHeight={620}
+          />
         )}
       </ChartContainer>
 

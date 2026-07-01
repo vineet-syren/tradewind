@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Card, CardContent, MenuItem, Snackbar, Stack, Tab, Tabs, TextField, Typography } from '@mui/material';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ScopeNote } from '@/components/layout/ScopeNote';
@@ -11,6 +11,7 @@ import { EmptyState } from '@/components/shared/EmptyState';
 import { LaneCard } from '@/modules/decarbonization/components/LaneCard';
 import { ScenarioCard } from '@/modules/decarbonization/components/ScenarioCard';
 import { LegTimeline } from '@/modules/decarbonization/components/LegTimeline';
+import { ShipmentLedgerSection } from '@/modules/decarbonization/components/ShipmentLedgerSection';
 import { useDataSource } from '@/hooks/useDataSource';
 import { useAsync } from '@/hooks/useAsync';
 import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
@@ -27,7 +28,7 @@ const LIST_SORTS: { key: ListSortKey; label: string; value: (l: Lane) => number 
   { key: 'pct', label: 'Reduction %', value: (l) => l.reductionPotentialPct },
 ];
 
-export default function RouteModeDecisioningPage() {
+export default function ShipmentAtlasPage() {
   const ds = useDataSource();
   const dispatch = useAppDispatch();
   const filters = useAppSelector((s) => s.filters.value);
@@ -37,86 +38,72 @@ export default function RouteModeDecisioningPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [routeCount, setRouteCount] = useState(8);
   const [listSort, setListSort] = useState<ListSortKey>('reduction');
+  const mapRef = useRef<HTMLDivElement>(null);
 
-  // Top N most-impactful lanes on the map (kept small so it reads cleanly).
   const mapLanes = useMemo(() => lanes?.slice(0, routeCount) ?? [], [lanes, routeCount]);
   const listLanes = useMemo(() => {
     const fn = LIST_SORTS.find((s) => s.key === listSort)!.value;
     return [...(lanes ?? [])].sort((a, b) => fn(b) - fn(a)).slice(0, 24);
   }, [lanes, listSort]);
 
-  // Clear the selection only if it falls out of the filtered set — default to
-  // the grouped view so the user sees the top shipment lanes first.
   useEffect(() => {
     if (selectedId && lanes && !lanes.find((l) => l.laneId === selectedId)) setSelectedId(null);
   }, [lanes, selectedId]);
 
+  // Selecting a shipment in the register isolates its route on the map above.
+  const traceRoute = (laneId: string) => {
+    setSelectedId(laneId);
+    mapRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   return (
     <Box>
       <PageHeader
-        overline="Visibility · End-to-end routes"
-        title="Shipment Route Map"
-        subtitle="Trace every shipment end to end — route, mode, CO₂e, distance and fuel. Select a lane to isolate its route and compare the Fastest, Balanced and Best-for-CO₂ options."
+        overline="Visibility · End-to-end shipments"
+        title="Shipment Atlas"
+        subtitle="The whole outbound network in one place — trace any route on the map, compare its Fastest / Balanced / Best-for-CO₂ options, and read every shipment in the register below. Click a shipment to trace it and see its full breakdown."
         actions={<ScopeNote />}
       />
       <FilterPanel />
 
-      <ChartContainer
-        title="Outbound shipment network"
-        subtitle={
-          selectedId
-            ? 'Tracing the selected shipment route'
-            : `Showing the top ${mapLanes.length} of ${lanes?.length ?? 0} lanes · click one to trace its full route`
-        }
-        action={
-          !selectedId && lanes ? (
-            <TextField
-              select
-              size="small"
-              label="Routes shown"
-              value={routeCount}
-              onChange={(e) => setRouteCount(Number(e.target.value))}
-              sx={{ width: 150 }}
-            >
-              {ROUTE_COUNTS.map((n) => (
-                <MenuItem key={n} value={n}>
-                  Top {n} lanes
-                </MenuItem>
-              ))}
-            </TextField>
-          ) : undefined
-        }
-      >
-        {status === 'loading' ? (
-          <ChartSkeleton height={420} />
-        ) : (
-          <WorldMap lanes={mapLanes} selectedLaneId={selectedId} onSelectLane={setSelectedId} onClear={() => setSelectedId(null)} height={460} />
-        )}
-      </ChartContainer>
+      <Box ref={mapRef}>
+        <ChartContainer
+          title="Outbound shipment network"
+          subtitle={
+            selectedId
+              ? 'Tracing the selected shipment route'
+              : `Showing the top ${mapLanes.length} of ${lanes?.length ?? 0} lanes · click one to trace its full route`
+          }
+          action={
+            !selectedId && lanes ? (
+              <TextField select size="small" label="Routes shown" value={routeCount} onChange={(e) => setRouteCount(Number(e.target.value))} sx={{ width: 150 }}>
+                {ROUTE_COUNTS.map((n) => (
+                  <MenuItem key={n} value={n}>Top {n} lanes</MenuItem>
+                ))}
+              </TextField>
+            ) : undefined
+          }
+        >
+          {status === 'loading' ? (
+            <ChartSkeleton height={420} />
+          ) : (
+            <WorldMap lanes={mapLanes} selectedLaneId={selectedId} onSelectLane={setSelectedId} onClear={() => setSelectedId(null)} height={460} />
+          )}
+        </ChartContainer>
+      </Box>
 
       <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', lg: '1fr 1.55fr' }, mt: 3 }}>
         <Box>
           <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1} sx={{ mb: 1.5 }}>
             <Box>
-              <Typography variant="subtitle1" sx={{ fontWeight: 700, lineHeight: 1.2 }}>
-                Shipment lanes
-              </Typography>
+              <Typography variant="subtitle1" sx={{ fontWeight: 700, lineHeight: 1.2 }}>Shipment lanes</Typography>
               <Typography variant="caption" color="text.secondary">
                 Ranked by {LIST_SORTS.find((s) => s.key === listSort)?.label.toLowerCase()} · highest first
               </Typography>
             </Box>
-            <TextField
-              select
-              size="small"
-              label="Rank by"
-              value={listSort}
-              onChange={(e) => setListSort(e.target.value as ListSortKey)}
-              sx={{ width: 180, flexShrink: 0 }}
-            >
+            <TextField select size="small" label="Rank by" value={listSort} onChange={(e) => setListSort(e.target.value as ListSortKey)} sx={{ width: 180, flexShrink: 0 }}>
               {LIST_SORTS.map((s) => (
-                <MenuItem key={s.key} value={s.key}>
-                  {s.label}
-                </MenuItem>
+                <MenuItem key={s.key} value={s.key}>{s.label}</MenuItem>
               ))}
             </TextField>
           </Stack>
@@ -137,11 +124,16 @@ export default function RouteModeDecisioningPage() {
           ) : (
             <Card>
               <CardContent>
-                <EmptyState title="Select a lane" description="Pick a lane on the map or the ranked list to compare its Fastest, Balanced and Best-for-CO₂ paths." />
+                <EmptyState title="Select a lane" description="Pick a lane on the map or the ranked list — or click a shipment in the register below — to compare its Fastest, Balanced and Best-for-CO₂ paths." />
               </CardContent>
             </Card>
           )}
         </Box>
+      </Box>
+
+      {/* Full shipment register — click a row to trace it above */}
+      <Box sx={{ mt: 3.5 }}>
+        <ShipmentLedgerSection onRowSelect={(s) => traceRoute(s.laneId)} />
       </Box>
 
       <Snackbar open={Boolean(toast)} autoHideDuration={2600} onClose={() => setToast(null)} message={toast ?? ''} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} />
@@ -182,9 +174,7 @@ function DecisionPanel({ laneId, onAdopt, onOpen360 }: { laneId: string; onAdopt
         <CardContent>
           <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
             <Box>
-              <Typography variant="overline" color="primary.main">
-                Decisioning · {lane.customer}
-              </Typography>
+              <Typography variant="overline" color="primary.main">Decisioning · {lane.customer}</Typography>
               <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.2 }}>
                 {lane.origin} → {lane.destPort} · {lane.productCategory}
               </Typography>
@@ -192,12 +182,7 @@ function DecisionPanel({ laneId, onAdopt, onOpen360 }: { laneId: string; onAdopt
                 {lane.shipmentCount} shipments · {lane.annualFrequency}/yr · LSP {lane.lsp}
               </Typography>
             </Box>
-            <Typography
-              variant="caption"
-              color="primary.main"
-              sx={{ cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap' }}
-              onClick={onOpen360}
-            >
+            <Typography variant="caption" color="primary.main" sx={{ cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap' }} onClick={onOpen360}>
               Full 360 →
             </Typography>
           </Stack>
@@ -216,9 +201,7 @@ function DecisionPanel({ laneId, onAdopt, onOpen360 }: { laneId: string; onAdopt
 
       <Card>
         <CardContent>
-          <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>
-            Leg breakdown &amp; CO₂e calculation
-          </Typography>
+          <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>Leg breakdown &amp; CO₂e calculation</Typography>
           <Tabs value={legTab} onChange={(_, v) => setLegTab(v)} sx={{ mb: 1.5, minHeight: 34, '& .MuiTab-root': { minHeight: 34, py: 0.5 } }}>
             {LEG_TABS.map((t) => (
               <Tab key={t.key} value={t.key} label={t.label} />
