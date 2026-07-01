@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Box, Card, CardContent, MenuItem, Snackbar, Stack, Tab, Tabs, TextField, Typography } from '@mui/material';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ScopeNote } from '@/components/layout/ScopeNote';
@@ -6,76 +6,106 @@ import { FilterPanel } from '@/components/filters/FilterPanel';
 import { ChartContainer } from '@/components/charts/ChartContainer';
 import { ScenarioCompareChart } from '@/components/charts/ScenarioCompareChart';
 import { WorldMap } from '@/components/map/WorldMap';
+import { ValueHero, type HeroPart } from '@/components/cards/ValueHero';
 import { ChartSkeleton, TableSkeleton } from '@/components/loaders/Skeletons';
 import { EmptyState } from '@/components/shared/EmptyState';
-import { LaneCard } from '@/modules/decarbonization/components/LaneCard';
 import { ScenarioCard } from '@/modules/decarbonization/components/ScenarioCard';
 import { LegTimeline } from '@/modules/decarbonization/components/LegTimeline';
 import { ShipmentLedgerSection } from '@/modules/decarbonization/components/ShipmentLedgerSection';
+import { ModeIcon } from '@/components/layout/iconRegistry';
 import { useDataSource } from '@/hooks/useDataSource';
 import { useAsync } from '@/hooks/useAsync';
 import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
 import { adoptDecision } from '@/app/store/actionsSlice';
 import { setSelectedLane } from '@/app/store/uiSlice';
-import type { ApproachKind, Lane, LaneDetail, Scenario } from '@/types';
+import type { ActionType, ApproachKind, LaneDetail, Scenario, Shipment } from '@/types';
+import { formatTonnes, formatIntensity, formatDistance, formatCurrency, formatWeightTonnes, formatDate } from '@/utils/format';
 
 const ROUTE_COUNTS = [5, 8, 12, 16];
-type ListSortKey = 'reduction' | 'co2e' | 'shipments' | 'pct';
-const LIST_SORTS: { key: ListSortKey; label: string; value: (l: Lane) => number }[] = [
-  { key: 'reduction', label: 'Savings / yr', value: (l) => l.realizableReductionTonnes },
-  { key: 'co2e', label: 'Total CO₂e', value: (l) => l.totalCo2eTonnes },
-  { key: 'shipments', label: 'Shipment volume', value: (l) => l.shipmentCount },
-  { key: 'pct', label: 'Reduction %', value: (l) => l.reductionPotentialPct },
-];
+
+const TYPE_LABEL: Record<string, string> = {
+  'mode-shift': 'mode shift',
+  'air-avoidance': 'air-freight avoidance',
+  'consolidation': 'consolidation',
+  'route-swap': 'route optimization',
+  'origin-port': 'greener gateways',
+  'lsp-swap': 'carrier switches',
+  'vendor-intervention': 'vendor governance',
+};
 
 export default function ShipmentAtlasPage() {
   const ds = useDataSource();
   const dispatch = useAppDispatch();
+  const persona = useAppSelector((s) => s.persona.current);
   const filters = useAppSelector((s) => s.filters.value);
   const { data: lanes, status } = useAsync(() => ds.getLanes({ filters, sortBy: 'reduction' }), [filters]);
+  const { data: recs } = useAsync(() => ds.getRecommendations({ persona, filters }), [persona, filters]);
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedLaneId, setSelectedLaneId] = useState<string | null>(null);
+  const [selectedShipment, setSelectedShipment] = useState<Shipment | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [routeCount, setRouteCount] = useState(8);
-  const [listSort, setListSort] = useState<ListSortKey>('reduction');
   const mapRef = useRef<HTMLDivElement>(null);
 
   const mapLanes = useMemo(() => lanes?.slice(0, routeCount) ?? [], [lanes, routeCount]);
-  const listLanes = useMemo(() => {
-    const fn = LIST_SORTS.find((s) => s.key === listSort)!.value;
-    return [...(lanes ?? [])].sort((a, b) => fn(b) - fn(a)).slice(0, 24);
-  }, [lanes, listSort]);
+
+  // "Value on the table" — total avoidable CO₂e across the open reduction backlog,
+  // with its top categories, so the miss is obvious at a glance.
+  const hero = useMemo(() => {
+    const open = recs ?? [];
+    // Honest, feasibility-tempered realizable reduction (not the inflated backlog).
+    const total = (lanes ?? []).reduce((s, l) => s + l.realizableReductionTonnes, 0);
+    const recTotal = open.reduce((s, r) => s + r.estCo2eSavingTonnes, 0);
+    const byType = new Map<ActionType, number>();
+    for (const r of open) byType.set(r.type, (byType.get(r.type) ?? 0) + r.estCo2eSavingTonnes);
+    // Split the realizable total across the top action categories by their share.
+    const parts: HeroPart[] = [...byType.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([t, v]) => ({ label: TYPE_LABEL[t] ?? t, tonnes: recTotal > 0 ? (v / recTotal) * total : 0 }));
+    return { total, parts, recCount: open.length };
+  }, [lanes, recs]);
 
   useEffect(() => {
-    if (selectedId && lanes && !lanes.find((l) => l.laneId === selectedId)) setSelectedId(null);
-  }, [lanes, selectedId]);
+    if (selectedLaneId && lanes && !lanes.find((l) => l.laneId === selectedLaneId)) {
+      setSelectedLaneId(null);
+      setSelectedShipment(null);
+    }
+  }, [lanes, selectedLaneId]);
 
-  // Selecting a shipment in the register isolates its route on the map above.
-  const traceRoute = (laneId: string) => {
-    setSelectedId(laneId);
+  const selectShipment = (s: Shipment) => {
+    setSelectedShipment(s);
+    setSelectedLaneId(s.laneId);
     mapRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
+  const selectLaneFromMap = (laneId: string) => {
+    setSelectedLaneId(laneId);
+    setSelectedShipment(null);
+  };
+  const activeLaneId = selectedShipment?.laneId ?? selectedLaneId;
 
   return (
     <Box>
       <PageHeader
         overline="Visibility · End-to-end shipments"
         title="Shipment Atlas"
-        subtitle="The whole outbound network in one place — trace any route on the map, compare its Fastest / Balanced / Best-for-CO₂ options, and read every shipment in the register below. Click a shipment to trace it and see its full breakdown."
+        subtitle="The whole outbound network in one place — trace routes on the map, read every shipment in the register, and select one to compare its Fastest / Balanced / Best-for-CO₂ options with the full 360 breakdown."
         actions={<ScopeNote />}
       />
       <FilterPanel />
+
+      <ValueHero totalTonnes={hero.total} parts={hero.parts} recCount={hero.recCount} />
 
       <Box ref={mapRef}>
         <ChartContainer
           title="Outbound shipment network"
           subtitle={
-            selectedId
+            activeLaneId
               ? 'Tracing the selected shipment route'
               : `Showing the top ${mapLanes.length} of ${lanes?.length ?? 0} lanes · click one to trace its full route`
           }
           action={
-            !selectedId && lanes ? (
+            !activeLaneId && lanes ? (
               <TextField select size="small" label="Routes shown" value={routeCount} onChange={(e) => setRouteCount(Number(e.target.value))} sx={{ width: 150 }}>
                 {ROUTE_COUNTS.map((n) => (
                   <MenuItem key={n} value={n}>Top {n} lanes</MenuItem>
@@ -87,57 +117,66 @@ export default function ShipmentAtlasPage() {
           {status === 'loading' ? (
             <ChartSkeleton height={420} />
           ) : (
-            <WorldMap lanes={mapLanes} selectedLaneId={selectedId} onSelectLane={setSelectedId} onClear={() => setSelectedId(null)} height={460} />
+            <WorldMap lanes={mapLanes} selectedLaneId={activeLaneId} onSelectLane={selectLaneFromMap} onClear={() => { setSelectedLaneId(null); setSelectedShipment(null); }} height={460} />
           )}
         </ChartContainer>
       </Box>
 
-      <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', lg: '1fr 1.55fr' }, mt: 3 }}>
-        <Box>
-          <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1} sx={{ mb: 1.5 }}>
-            <Box>
-              <Typography variant="subtitle1" sx={{ fontWeight: 700, lineHeight: 1.2 }}>Shipment lanes</Typography>
-              <Typography variant="caption" color="text.secondary">
-                Ranked by {LIST_SORTS.find((s) => s.key === listSort)?.label.toLowerCase()} · highest first
-              </Typography>
-            </Box>
-            <TextField select size="small" label="Rank by" value={listSort} onChange={(e) => setListSort(e.target.value as ListSortKey)} sx={{ width: 180, flexShrink: 0 }}>
-              {LIST_SORTS.map((s) => (
-                <MenuItem key={s.key} value={s.key}>{s.label}</MenuItem>
-              ))}
-            </TextField>
-          </Stack>
-          {status === 'loading' ? (
-            <TableSkeleton rows={6} />
-          ) : (
-            <Stack spacing={1.5} sx={{ maxHeight: 760, overflowY: 'auto', px: 0.5, py: 0.5 }}>
-              {listLanes.map((l) => (
-                <LaneCard key={l.laneId} lane={l} selected={l.laneId === selectedId} rankBy={listSort} onClick={() => setSelectedId(l.laneId)} />
-              ))}
-            </Stack>
-          )}
-        </Box>
+      {/* Register (left) · detail on selection (right) */}
+      <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, mt: 3, alignItems: 'start' }}>
+        <ShipmentLedgerSection compact onRowSelect={selectShipment} selectedId={selectedShipment?.shipmentId} />
 
-        <Box>
-          {selectedId ? (
-            <DecisionPanel laneId={selectedId} onAdopt={(m) => setToast(m)} onOpen360={() => dispatch(setSelectedLane(selectedId))} />
+        <Box sx={{ position: { lg: 'sticky' }, top: { lg: 16 } }}>
+          {selectedShipment ? (
+            <Stack spacing={2}>
+              <ShipmentFactsCard s={selectedShipment} />
+              <DecisionPanel laneId={selectedShipment.laneId} onAdopt={(m) => setToast(m)} onOpen360={() => dispatch(setSelectedLane(selectedShipment.laneId))} />
+            </Stack>
+          ) : selectedLaneId ? (
+            <DecisionPanel laneId={selectedLaneId} onAdopt={(m) => setToast(m)} onOpen360={() => dispatch(setSelectedLane(selectedLaneId))} />
           ) : (
-            <Card>
+            <Card sx={{ minHeight: 320, display: 'grid', placeItems: 'center' }}>
               <CardContent>
-                <EmptyState title="Select a lane" description="Pick a lane on the map or the ranked list — or click a shipment in the register below — to compare its Fastest, Balanced and Best-for-CO₂ paths." />
+                <EmptyState title="Select a shipment" description="Pick a shipment in the register on the left — or a lane on the map — to see its route, the Best-for-CO₂ / Balanced / Fastest options and the full 360 breakdown." />
               </CardContent>
             </Card>
           )}
         </Box>
       </Box>
 
-      {/* Full shipment register — click a row to trace it above */}
-      <Box sx={{ mt: 3.5 }}>
-        <ShipmentLedgerSection onRowSelect={(s) => traceRoute(s.laneId)} />
-      </Box>
-
       <Snackbar open={Boolean(toast)} autoHideDuration={2600} onClose={() => setToast(null)} message={toast ?? ''} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} />
     </Box>
+  );
+}
+
+function Fact({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <Box>
+      <Typography variant="caption" sx={{ color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: 10, display: 'block' }}>{label}</Typography>
+      <Typography variant="body2" component="div" sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{value}</Typography>
+    </Box>
+  );
+}
+
+function ShipmentFactsCard({ s }: { s: Shipment }) {
+  return (
+    <Card>
+      <CardContent>
+        <Typography variant="overline" color="primary.main">Shipment · {s.shipmentId}</Typography>
+        <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.2 }}>{s.origin} → {s.destPort}</Typography>
+        <Typography variant="caption" color="text.secondary">
+          {s.productName} · {s.customer} · {s.status} · ships {formatDate(s.date)} → ETA {formatDate(s.eta)}
+        </Typography>
+        <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: 'repeat(3, 1fr)', mt: 1.5 }}>
+          <Fact label="CO₂e" value={formatTonnes(s.co2eTonnes)} />
+          <Fact label="Intensity" value={formatIntensity(s.co2ePerTonneKm)} />
+          <Fact label="Mode" value={<Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}><ModeIcon mode={s.primaryMode} fontSize="small" />{s.primaryMode}</Box>} />
+          <Fact label="Weight" value={formatWeightTonnes(s.weightTonnes)} />
+          <Fact label="Distance" value={formatDistance(s.totalDistanceKm)} />
+          <Fact label="Freight" value={formatCurrency(s.freightUsd)} />
+        </Box>
+      </CardContent>
+    </Card>
   );
 }
 

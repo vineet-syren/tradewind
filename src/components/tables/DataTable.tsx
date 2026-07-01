@@ -29,6 +29,7 @@ export function DataTable<T>({
   dense = true,
   initialSortKey,
   maxHeight,
+  selectedRowKey,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -37,6 +38,7 @@ export function DataTable<T>({
   dense?: boolean;
   initialSortKey?: string;
   maxHeight?: number;
+  selectedRowKey?: string | null;
 }) {
   const [sortKey, setSortKey] = useState<string | undefined>(initialSortKey);
   const [dir, setDir] = useState<'asc' | 'desc'>('desc');
@@ -80,12 +82,16 @@ export function DataTable<T>({
           </TableRow>
         </TableHead>
         <TableBody>
-          {sorted.map((row, i) => (
+          {sorted.map((row, i) => {
+            const key = getRowKey(row, i);
+            const isSelected = selectedRowKey != null && key === selectedRowKey;
+            return (
             <TableRow
-              key={getRowKey(row, i)}
+              key={key}
               hover={Boolean(onRowClick)}
+              selected={isSelected}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
-              sx={{ cursor: onRowClick ? 'pointer' : 'default' }}
+              sx={{ cursor: onRowClick ? 'pointer' : 'default', '&.Mui-selected, &.Mui-selected:hover': { bgcolor: 'action.selected' } }}
             >
               {columns.map((c) => (
                 <TableCell key={c.key} align={c.align}>
@@ -93,7 +99,8 @@ export function DataTable<T>({
                 </TableCell>
               ))}
             </TableRow>
-          ))}
+            );
+          })}
         </TableBody>
       </Table>
     </TableContainer>

@@ -34,7 +34,7 @@ function Stat({ label, value }: { label: string; value: string }) {
  * global period + filters plus a local status. A row click opens the full
  * breakdown and (optionally) tells the parent to isolate that route on the map.
  */
-export function ShipmentLedgerSection({ onRowSelect }: { onRowSelect?: (s: Shipment) => void }) {
+export function ShipmentLedgerSection({ onRowSelect, selectedId, compact = false }: { onRowSelect?: (s: Shipment) => void; selectedId?: string | null; compact?: boolean }) {
   const ds = useDataSource();
   const persona = useAppSelector((s) => s.persona.current);
   const filters = useAppSelector((s) => s.filters.value);
@@ -62,7 +62,7 @@ export function ShipmentLedgerSection({ onRowSelect }: { onRowSelect?: (s: Shipm
     ? `${filters.dateFrom ? formatDate(filters.dateFrom) : 'start'} – ${filters.dateTo ? formatDate(filters.dateTo) : 'today'}`
     : `All actuals through ${formatDate(APP_TODAY)}`;
 
-  const columns: Column<Shipment>[] = [
+  const allColumns: Column<Shipment>[] = [
     { key: 'date', header: 'Ship date', render: (s) => <Typography variant="body2" sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatDate(s.date)}</Typography>, sortValue: (s) => s.date },
     { key: 'eta', header: 'ETA', render: (s) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDate(s.eta)}</span>, sortValue: (s) => s.eta },
     { key: 'status', header: 'Status', render: (s) => <Chip size="small" color={STATUS_COLOR[s.status] ?? 'default'} label={s.status} />, sortValue: (s) => s.status },
@@ -77,6 +77,11 @@ export function ShipmentLedgerSection({ onRowSelect }: { onRowSelect?: (s: Shipm
     { key: 'intensity', header: 'g/t·km', align: 'right', render: (s) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatIntensity(s.co2ePerTonneKm)}</span>, sortValue: (s) => s.co2ePerTonneKm },
     { key: 'carrier', header: 'Carrier', render: (s) => s.carrier, sortValue: (s) => s.carrier },
   ];
+  // Compact view (for the split layout) keeps only the essentials — full detail
+  // opens in the panel alongside.
+  const compactKeys = ['date', 'status', 'lane', 'product', 'customer', 'co2e'];
+  const columns = compact ? allColumns.filter((c) => compactKeys.includes(c.key)) : allColumns;
+  const handleRow = (s: Shipment) => { if (onRowSelect) onRowSelect(s); else setSelected(s.shipmentId); };
 
   return (
     <Box>
@@ -123,14 +128,15 @@ export function ShipmentLedgerSection({ onRowSelect }: { onRowSelect?: (s: Shipm
             columns={columns}
             rows={rows}
             getRowKey={(s) => s.shipmentId}
-            onRowClick={(s) => { setSelected(s.shipmentId); onRowSelect?.(s); }}
+            onRowClick={handleRow}
+            selectedRowKey={selectedId ?? selected}
             initialSortKey="date"
             maxHeight={620}
           />
         )}
       </ChartContainer>
 
-      <ShipmentDetailDialog shipmentId={selected} onClose={() => setSelected(null)} />
+      {!onRowSelect && <ShipmentDetailDialog shipmentId={selected} onClose={() => setSelected(null)} />}
     </Box>
   );
 }
