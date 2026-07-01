@@ -13,22 +13,17 @@ export interface NavGroupDef {
 export const NAV_GROUPS: NavGroupDef[] = [
   {
     heading: '',
-    items: [{ label: 'Carbon Copilot', to: '/', iconKey: 'copilot' }],
-  },
-  {
-    heading: 'VISIBILITY',
     items: [
-      { label: 'Shipment Atlas', to: '/shipments', iconKey: 'atlas' },
-      { label: 'Emission Hotspots', to: '/hotspots', iconKey: 'hotspots' },
-      { label: 'Customer & Product Lanes', to: '/lanes', iconKey: 'lanes' },
-      { label: 'Carrier & Vendor Performance', to: '/partners', iconKey: 'partners' },
+      { label: 'Carbon Copilot', to: '/', iconKey: 'copilot' },
+      { label: 'Control Tower', to: '/control-tower', iconKey: 'atlas' },
     ],
   },
   {
-    heading: 'REDUCE',
+    heading: 'ANALYZE',
     items: [
-      { label: 'Reduction Planner', to: '/planner', iconKey: 'scheduler' },
-      { label: 'Action Tracker', to: '/actions', iconKey: 'actions' },
+      { label: 'Emission Hotspots', to: '/hotspots', iconKey: 'hotspots' },
+      { label: 'Customer & Product Lanes', to: '/lanes', iconKey: 'lanes' },
+      { label: 'Carrier & Vendor Performance', to: '/partners', iconKey: 'partners' },
     ],
   },
   {

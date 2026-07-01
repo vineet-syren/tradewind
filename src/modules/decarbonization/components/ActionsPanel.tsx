@@ -1,23 +1,6 @@
 import { useMemo, useState } from 'react';
-import {
-  Autocomplete,
-  Box,
-  Button,
-  Card,
-  CardContent,
-  Chip,
-  MenuItem,
-  Snackbar,
-  Stack,
-  Tab,
-  Tabs,
-  TextField,
-  Typography,
-} from '@mui/material';
+import { Autocomplete, Box, Button, Card, CardContent, Chip, MenuItem, Snackbar, Stack, Tab, Tabs, TextField, Typography } from '@mui/material';
 import SaveRoundedIcon from '@mui/icons-material/SaveRounded';
-import { PageHeader } from '@/components/layout/PageHeader';
-import { ScopeNote } from '@/components/layout/ScopeNote';
-import { FilterPanel } from '@/components/filters/FilterPanel';
 import { KpiCard } from '@/components/cards/KpiCard';
 import { TableSkeleton } from '@/components/loaders/Skeletons';
 import { EmptyState } from '@/components/shared/EmptyState';
@@ -26,13 +9,7 @@ import { AuditLog } from '@/modules/decarbonization/components/AuditLog';
 import { useDataSource } from '@/hooks/useDataSource';
 import { useAsync } from '@/hooks/useAsync';
 import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
-import {
-  adoptDecision,
-  assignRecommendationOwner,
-  dismissRecommendation,
-  executeRecommendation,
-  snoozeRecommendation,
-} from '@/app/store/actionsSlice';
+import { adoptDecision, assignRecommendationOwner, dismissRecommendation, executeRecommendation, snoozeRecommendation } from '@/app/store/actionsSlice';
 import { setSelectedLane } from '@/app/store/uiSlice';
 import { PERSONAS } from '@/constants/personas';
 import { APPROACH_LABEL } from '@/constants/app';
@@ -50,7 +27,8 @@ const GROUPS: { key: GroupKey; label: string }[] = [
 const OWNER_OPTIONS = PERSONAS.map((p) => p.name);
 const APPROACHES: ApproachKind[] = ['best_co2', 'balanced', 'optimal'];
 
-export default function ActionCenterPage() {
+/** Action tracker — decisions, delegation and the audit trail, folded into the hub. */
+export function ActionsPanel() {
   const ds = useDataSource();
   const dispatch = useAppDispatch();
   const persona = useAppSelector((s) => s.persona.current);
@@ -85,24 +63,18 @@ export default function ActionCenterPage() {
   const queuedSaving = (recs ?? []).filter((r) => executedRecIds.includes(r.id)).reduce((s, r) => s + r.estCo2eSavingTonnes, 0);
 
   const kpis: KpiMetric[] = [
-    { id: 'priority', label: 'Priority actions', value: groups.priority.length, unit: 'number', intent: groups.priority.length ? 'risk' : 'neutral', hint: 'high-impact, awaiting decision' },
-    { id: 'executed', label: 'Executed this session', value: executedRecIds.length, unit: 'number', intent: 'positive', hint: 'tasks created' },
-    { id: 'queued', label: 'CO₂e saving queued', value: queuedSaving, unit: 'tonnes', display: `${formatTonnes(queuedSaving)}/yr`, intent: 'opportunity', hint: 'from executed actions' },
-    { id: 'decisions', label: 'Decisions logged', value: decisions.length, unit: 'number', intent: 'neutral', hint: 'lane approach adopted' },
+    { id: 'priority', label: 'Priority actions', value: groups.priority.length, unit: 'number', intent: groups.priority.length ? 'risk' : 'neutral', icon: 'risk', hint: 'high-impact, awaiting decision' },
+    { id: 'executed', label: 'Executed this session', value: executedRecIds.length, unit: 'number', intent: 'positive', icon: 'green', hint: 'tasks created' },
+    { id: 'queued', label: 'CO₂e saving queued', value: queuedSaving, unit: 'tonnes', display: `${formatTonnes(queuedSaving)}/yr`, intent: 'opportunity', icon: 'savings', hint: 'from executed actions' },
+    { id: 'decisions', label: 'Decisions logged', value: decisions.length, unit: 'number', intent: 'neutral', icon: 'lanes', hint: 'lane approach adopted' },
   ];
 
-  // Decision write-back form
   const [lane, setLane] = useState<Lane | null>(null);
   const [approach, setApproach] = useState<ApproachKind>('best_co2');
   const [note, setNote] = useState('');
 
   const savingFor = (l: Lane, a: ApproachKind): number => {
-    const per =
-      a === 'best_co2'
-        ? l.currentPerShipmentTonnes - l.bestPerShipmentTonnes
-        : a === 'balanced'
-          ? l.currentPerShipmentTonnes - l.balancedPerShipmentTonnes
-          : 0;
+    const per = a === 'best_co2' ? l.currentPerShipmentTonnes - l.bestPerShipmentTonnes : a === 'balanced' ? l.currentPerShipmentTonnes - l.balancedPerShipmentTonnes : 0;
     return Math.max(0, per) * l.annualFrequency;
   };
 
@@ -116,48 +88,22 @@ export default function ActionCenterPage() {
 
   return (
     <Box>
-      <PageHeader
-        overline="Reduce · Recommendation Tracker"
-        title="Action Tracker"
-        subtitle="Prioritized reduction actions that need a decision, a partner nudge, or execution — each with estimated CO₂e saving, cost and SLA impact, and a full audit trail."
-        actions={<ScopeNote />}
-      />
-      <FilterPanel />
-
       <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' }, mb: 3 }}>
-        {kpis.map((m) => (
-          <KpiCard key={m.id} metric={m} />
-        ))}
+        {kpis.map((m) => <KpiCard key={m.id} metric={m} />)}
       </Box>
 
       <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', lg: '1.6fr 1fr' } }}>
         <Box>
-          <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-            Execute priorities
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            Grouped by urgency · execute, delegate, snooze or dismiss
-          </Typography>
+          <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Execute priorities</Typography>
+          <Typography variant="caption" color="text.secondary">Grouped by urgency · execute, delegate, snooze or dismiss</Typography>
           <Tabs value={tab} onChange={(_, v) => setTab(v as GroupKey)} variant="scrollable" scrollButtons="auto" sx={{ mt: 1.5, minHeight: 36, '& .MuiTab-root': { minHeight: 36, py: 0.5 } }}>
             {GROUPS.map((g) => (
-              <Tab
-                key={g.key}
-                value={g.key}
-                label={
-                  <Stack direction="row" spacing={0.75} alignItems="center">
-                    <span>{g.label}</span>
-                    <Chip size="small" label={groups[g.key].length} sx={{ height: 18, fontSize: 11 }} />
-                  </Stack>
-                }
-              />
+              <Tab key={g.key} value={g.key} label={<Stack direction="row" spacing={0.75} alignItems="center"><span>{g.label}</span><Chip size="small" label={groups[g.key].length} sx={{ height: 18, fontSize: 11 }} /></Stack>} />
             ))}
           </Tabs>
-
           <Stack spacing={1.5} sx={{ mt: 2 }}>
             {status === 'loading' && <TableSkeleton rows={4} />}
-            {status === 'success' && visible.length === 0 && (
-              <EmptyState title="Nothing here" description={`No ${GROUPS.find((g) => g.key === tab)?.label.toLowerCase()} actions in scope.`} />
-            )}
+            {status === 'success' && visible.length === 0 && <EmptyState title="Nothing here" description={`No ${GROUPS.find((g) => g.key === tab)?.label.toLowerCase()} actions in scope.`} />}
             {visible.map((r) => (
               <RecommendationCard
                 key={r.id}
@@ -166,22 +112,10 @@ export default function ActionCenterPage() {
                 snoozed={snoozedRecIds.includes(r.id)}
                 delegate={delegatedRecIds[r.id]}
                 ownerOptions={OWNER_OPTIONS}
-                onExecute={() => {
-                  dispatch(executeRecommendation(r));
-                  setToast(`Executed · ${formatTonnes(r.estCo2eSavingTonnes)}/yr queued`);
-                }}
-                onSnooze={() => {
-                  dispatch(snoozeRecommendation(r));
-                  setToast('Snoozed');
-                }}
-                onDismiss={() => {
-                  dispatch(dismissRecommendation(r.id));
-                  setToast('Dismissed');
-                }}
-                onAssign={(o) => {
-                  dispatch(assignRecommendationOwner({ rec: r, assignee: o }));
-                  setToast(`Delegated to ${o}`);
-                }}
+                onExecute={() => { dispatch(executeRecommendation(r)); setToast(`Executed · ${formatTonnes(r.estCo2eSavingTonnes)}/yr queued`); }}
+                onSnooze={() => { dispatch(snoozeRecommendation(r)); setToast('Snoozed'); }}
+                onDismiss={() => { dispatch(dismissRecommendation(r.id)); setToast('Dismissed'); }}
+                onAssign={(o) => { dispatch(assignRecommendationOwner({ rec: r, assignee: o })); setToast(`Delegated to ${o}`); }}
                 onOpenLane={r.laneId ? () => dispatch(setSelectedLane(r.laneId!)) : undefined}
               />
             ))}
@@ -191,47 +125,23 @@ export default function ActionCenterPage() {
         <Stack spacing={2}>
           <Card>
             <CardContent>
-              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                Log a lane decision
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                Adopt an approach for a lane — recorded as ESG evidence
-              </Typography>
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Log a lane decision</Typography>
+              <Typography variant="caption" color="text.secondary">Adopt an approach for a lane — recorded as ESG evidence</Typography>
               <Stack spacing={1.75} sx={{ mt: 2 }}>
-                <Autocomplete
-                  size="small"
-                  options={lanes ?? []}
-                  getOptionLabel={(o) => o.label}
-                  value={lane}
-                  onChange={(_, v) => setLane(v)}
-                  isOptionEqualToValue={(o, v) => o.laneId === v.laneId}
-                  renderInput={(params) => <TextField {...params} label="Lane" placeholder="Search lanes" />}
-                />
+                <Autocomplete size="small" options={lanes ?? []} getOptionLabel={(o) => o.label} value={lane} onChange={(_, v) => setLane(v)} isOptionEqualToValue={(o, v) => o.laneId === v.laneId} renderInput={(params) => <TextField {...params} label="Lane" placeholder="Search lanes" />} />
                 <TextField select size="small" label="Approach" value={approach} onChange={(e) => setApproach(e.target.value as ApproachKind)}>
-                  {APPROACHES.map((a) => (
-                    <MenuItem key={a} value={a}>
-                      {APPROACH_LABEL[a]}
-                    </MenuItem>
-                  ))}
+                  {APPROACHES.map((a) => <MenuItem key={a} value={a}>{APPROACH_LABEL[a]}</MenuItem>)}
                 </TextField>
-                {lane && (
-                  <Typography variant="caption" color="primary.main" sx={{ fontWeight: 600 }}>
-                    Estimated saving: {formatTonnes(savingFor(lane, approach))}/yr
-                  </Typography>
-                )}
+                {lane && <Typography variant="caption" color="primary.main" sx={{ fontWeight: 600 }}>Estimated saving: {formatTonnes(savingFor(lane, approach))}/yr</Typography>}
                 <TextField size="small" label="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} multiline minRows={2} />
-                <Button variant="contained" startIcon={<SaveRoundedIcon />} disabled={!lane} onClick={submitDecision}>
-                  Log decision
-                </Button>
+                <Button variant="contained" startIcon={<SaveRoundedIcon />} disabled={!lane} onClick={submitDecision}>Log decision</Button>
               </Stack>
             </CardContent>
           </Card>
 
           <Card>
             <CardContent>
-              <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>
-                Audit trail
-              </Typography>
+              <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>Audit trail</Typography>
               <AuditLog entries={log} />
             </CardContent>
           </Card>

@@ -28,7 +28,7 @@ export function ValueHero({ totalTonnes, parts, recCount }: { totalTonnes: numbe
           Avoidable across the network
         </Typography>
         <Typography sx={{ mt: 1.25, fontWeight: 800, lineHeight: 1.25, fontSize: { xs: '1.5rem', md: '2rem' }, textWrap: 'balance' }}>
-          You&rsquo;re leaving <A>{formatTonnes(totalTonnes)} CO₂e/yr</A> on the table
+          You&rsquo;re leaving <A>{formatTonnes(totalTonnes)} CO₂e/yr</A> in savings on the table
           {parts.length > 0 && <> — </>}
           {parts.map((p, i) => (
             <Box component="span" key={p.label}>
@@ -39,7 +39,7 @@ export function ValueHero({ totalTonnes, parts, recCount }: { totalTonnes: numbe
           .
         </Typography>
         <Typography sx={{ mt: 1.5, color: 'rgba(255,255,255,0.72)', fontSize: '.95rem' }}>
-          {recCount} recommendation{recCount === 1 ? '' : 's'} in the Reduction Planner can act on this now.
+          Realizable this year — <b style={{ color: '#fff' }}>{recCount}</b> ranked actions are ready to capture it in <b style={{ color: '#fff' }}>Reduce &amp; plan</b>.
         </Typography>
       </CardContent>
     </Card>

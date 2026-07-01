@@ -5,9 +5,6 @@ import AutoAwesomeRounded from '@mui/icons-material/AutoAwesomeRounded';
 import CalendarMonthRounded from '@mui/icons-material/CalendarMonthRounded';
 import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded';
 import BoltRounded from '@mui/icons-material/BoltRounded';
-import { PageHeader } from '@/components/layout/PageHeader';
-import { ScopeNote } from '@/components/layout/ScopeNote';
-import { FilterPanel } from '@/components/filters/FilterPanel';
 import { KpiCard } from '@/components/cards/KpiCard';
 import { ChartContainer } from '@/components/charts/ChartContainer';
 import { ScheduleBars } from '@/components/charts/ScheduleBars';
@@ -35,13 +32,14 @@ const TYPE_FILTERS: { key: ActionType; label: string }[] = [
   { key: 'vendor-intervention', label: 'Vendor' },
 ];
 
-export default function ReductionPlannerPage() {
+/** Forward planning + reduction backlog — the "reduce" workspace, folded into the hub. */
+export function ReducePanel() {
   const ds = useDataSource();
   const dispatch = useAppDispatch();
   const persona = useAppSelector((s) => s.persona.current);
   const filters = useAppSelector((s) => s.filters.value);
   const { executedRecIds, dismissedRecIds, snoozedRecIds } = useAppSelector((s) => s.actions);
-  const { data: schedule, status: schedStatus } = useAsync(() => ds.getSchedule({ persona, filters }), [persona, filters]);
+  const { data: schedule } = useAsync(() => ds.getSchedule({ persona, filters }), [persona, filters]);
   const { data: recs, status: recStatus } = useAsync(() => ds.getRecommendations({ persona, filters }), [persona, filters]);
 
   const [activeTypes, setActiveTypes] = useState<Set<ActionType>>(new Set());
@@ -56,10 +54,7 @@ export default function ReductionPlannerPage() {
     });
 
   const openRecs = useMemo(() => (recs ?? []).filter((r) => !dismissedRecIds.includes(r.id)), [recs, dismissedRecIds]);
-  const filtered = useMemo(
-    () => openRecs.filter((r) => activeTypes.size === 0 || activeTypes.has(r.type)),
-    [openRecs, activeTypes],
-  );
+  const filtered = useMemo(() => openRecs.filter((r) => activeTypes.size === 0 || activeTypes.has(r.type)), [openRecs, activeTypes]);
   const backlogSaving = openRecs.reduce((s, r) => s + r.estCo2eSavingTonnes, 0);
   const topRec = [...openRecs].sort((a, b) => b.estCo2eSavingTonnes - a.estCo2eSavingTonnes)[0];
 
@@ -84,14 +79,6 @@ export default function ReductionPlannerPage() {
 
   return (
     <Box>
-      <PageHeader
-        overline="Reduce · Planning & Reduction Engine"
-        title="Reduction Planner"
-        subtitle="Plan the forward book and act on the reduction backlog in one place — lock the lowest-carbon route before each shipment books, and work the ranked opportunities behind them."
-        actions={<ScopeNote />}
-      />
-      <FilterPanel />
-
       <Box sx={{ mb: 3 }}>
         {kpis ? (
           <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' } }}>
@@ -100,7 +87,6 @@ export default function ReductionPlannerPage() {
         ) : <KpiSkeleton count={4} />}
       </Box>
 
-      {/* AI planner brief */}
       {schedule && topRec && (
         <Card sx={{ mb: 3, border: 1, borderColor: (t) => alpha(t.palette.primary.main, 0.35), background: (t) => `linear-gradient(180deg, ${alpha(t.palette.primary.main, 0.06)} 0%, ${t.palette.background.paper} 60%)` }}>
           <CardContent>
@@ -127,18 +113,11 @@ export default function ReductionPlannerPage() {
         </Card>
       )}
 
-      {/* Forward book */}
       <Box sx={{ mb: 3 }}>
-        <ChartContainer
-          title="Projected CO₂e by week"
-          subtitle="The forward book, stacked by mode — watch the red (air) band and plan it down early"
-          icon={<CalendarMonthRounded sx={{ fontSize: 18 }} />}
-        >
+        <ChartContainer title="Projected CO₂e by week" subtitle="The forward book, stacked by mode — watch the red (air) band and plan it down early" icon={<CalendarMonthRounded sx={{ fontSize: 18 }} />}>
           {schedule ? (
             schedule.byWeek.length ? <ScheduleBars data={schedule.byWeek} height={280} /> : (
-              <Typography variant="body2" color="text.secondary" sx={{ py: 6, textAlign: 'center' }}>
-                No planned shipments in this window. Widen the date range to plan further out.
-              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ py: 6, textAlign: 'center' }}>No planned shipments in this window. Widen the date range to plan further out.</Typography>
             )
           ) : <ChartSkeleton height={280} />}
         </ChartContainer>
@@ -150,15 +129,10 @@ export default function ReductionPlannerPage() {
             <EventRepeatRounded sx={{ fontSize: 18, color: 'primary.main' }} />
             <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Planned shipments · {schedule?.plannedCount ?? 0}</Typography>
           </Stack>
-          {schedStatus === 'loading' || !schedule ? (
-            <TableSkeleton rows={6} />
-          ) : (
-            <DataTable columns={columns} rows={schedule.shipments} getRowKey={(s) => s.shipmentId} maxHeight={460} />
-          )}
+          {!schedule ? <TableSkeleton rows={6} /> : <DataTable columns={columns} rows={schedule.shipments} getRowKey={(s) => s.shipmentId} maxHeight={460} />}
         </CardContent>
       </Card>
 
-      {/* Reduction opportunity backlog */}
       <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
         <BoltRounded sx={{ fontSize: 18, color: 'primary.main' }} />
         <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Reduction opportunities</Typography>
