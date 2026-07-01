@@ -22,6 +22,7 @@ import type { ActionType, ApproachKind, LaneDetail, Scenario, Shipment } from '@
 import { formatTonnes, formatIntensity, formatDistance, formatCurrency, formatWeightTonnes, formatDate } from '@/utils/format';
 
 const ROUTE_COUNTS = [5, 8, 12, 16];
+type ScenarioKind = 'current' | 'best' | 'balanced' | 'optimal';
 
 const TYPE_LABEL: Record<string, string> = {
   'mode-shift': 'mode shift',
@@ -43,6 +44,7 @@ export default function ShipmentAtlasPage() {
 
   const [selectedLaneId, setSelectedLaneId] = useState<string | null>(null);
   const [selectedShipment, setSelectedShipment] = useState<Shipment | null>(null);
+  const [chosenKind, setChosenKind] = useState<ScenarioKind>('current');
   const [toast, setToast] = useState<string | null>(null);
   const [routeCount, setRouteCount] = useState(8);
   const mapRef = useRef<HTMLDivElement>(null);
@@ -76,13 +78,17 @@ export default function ShipmentAtlasPage() {
   const selectShipment = (s: Shipment) => {
     setSelectedShipment(s);
     setSelectedLaneId(s.laneId);
+    setChosenKind('current'); // start from the route as-is
     mapRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
   const selectLaneFromMap = (laneId: string) => {
     setSelectedLaneId(laneId);
     setSelectedShipment(null);
+    setChosenKind('current');
   };
   const activeLaneId = selectedShipment?.laneId ?? selectedLaneId;
+  // Past shipments (already shipped) are read-only; upcoming (Planned) let you choose.
+  const isPast = Boolean(selectedShipment && selectedShipment.status !== 'Planned');
 
   return (
     <Box>
@@ -117,7 +123,7 @@ export default function ShipmentAtlasPage() {
           {status === 'loading' ? (
             <ChartSkeleton height={420} />
           ) : (
-            <WorldMap lanes={mapLanes} selectedLaneId={activeLaneId} onSelectLane={selectLaneFromMap} onClear={() => { setSelectedLaneId(null); setSelectedShipment(null); }} height={460} />
+            <WorldMap lanes={mapLanes} selectedLaneId={activeLaneId} scenarioKind={chosenKind} onSelectLane={selectLaneFromMap} onClear={() => { setSelectedLaneId(null); setSelectedShipment(null); setChosenKind('current'); }} height={460} />
           )}
         </ChartContainer>
       </Box>
@@ -130,10 +136,10 @@ export default function ShipmentAtlasPage() {
           {selectedShipment ? (
             <Stack spacing={2}>
               <ShipmentFactsCard s={selectedShipment} />
-              <DecisionPanel laneId={selectedShipment.laneId} onAdopt={(m) => setToast(m)} onOpen360={() => dispatch(setSelectedLane(selectedShipment.laneId))} />
+              <DecisionPanel laneId={selectedShipment.laneId} chosenKind={chosenKind} onChooseKind={setChosenKind} readOnly={isPast} onAdopt={(m) => setToast(m)} onOpen360={() => dispatch(setSelectedLane(selectedShipment.laneId))} />
             </Stack>
           ) : selectedLaneId ? (
-            <DecisionPanel laneId={selectedLaneId} onAdopt={(m) => setToast(m)} onOpen360={() => dispatch(setSelectedLane(selectedLaneId))} />
+            <DecisionPanel laneId={selectedLaneId} chosenKind={chosenKind} onChooseKind={setChosenKind} readOnly={false} onAdopt={(m) => setToast(m)} onOpen360={() => dispatch(setSelectedLane(selectedLaneId))} />
           ) : (
             <Card sx={{ minHeight: 320, display: 'grid', placeItems: 'center' }}>
               <CardContent>
@@ -187,15 +193,15 @@ const LEG_TABS: { key: keyof LaneDetail['scenarios']; label: string }[] = [
   { key: 'optimal', label: 'Fastest' },
 ];
 
-function DecisionPanel({ laneId, onAdopt, onOpen360 }: { laneId: string; onAdopt: (m: string) => void; onOpen360: () => void }) {
+function DecisionPanel({ laneId, onAdopt, onOpen360, chosenKind, onChooseKind, readOnly = false }: { laneId: string; onAdopt: (m: string) => void; onOpen360: () => void; chosenKind: ScenarioKind; onChooseKind: (k: ScenarioKind) => void; readOnly?: boolean }) {
   const ds = useDataSource();
   const dispatch = useAppDispatch();
   const { data: lane, status } = useAsync(() => ds.getLane(laneId), [laneId]);
-  const [legTab, setLegTab] = useState<keyof LaneDetail['scenarios']>('best');
 
   if (status === 'loading' || !lane) return <TableSkeleton rows={6} />;
 
-  const adopt = (s: Scenario) => {
+  const adopt = (s: Scenario, kind: ScenarioKind) => {
+    onChooseKind(kind);
     dispatch(
       adoptDecision({
         laneId: lane.laneId,
@@ -204,7 +210,7 @@ function DecisionPanel({ laneId, onAdopt, onOpen360 }: { laneId: string; onAdopt
         savingTonnes: Math.max(0, s.co2eDeltaTonnes) * lane.annualFrequency,
       }),
     );
-    onAdopt(`Adopted ${s.label} on ${lane.label} · ${Math.max(0, Math.round(s.co2eDeltaTonnes * lane.annualFrequency))} t/yr`);
+    onAdopt(`Route locked · ${s.label} on ${lane.label} · ${Math.max(0, Math.round(s.co2eDeltaTonnes * lane.annualFrequency))} t/yr`);
   };
 
   return (
@@ -225,6 +231,11 @@ function DecisionPanel({ laneId, onAdopt, onOpen360 }: { laneId: string; onAdopt
               Full 360 →
             </Typography>
           </Stack>
+          <Typography variant="caption" sx={{ display: 'block', mt: 1, color: readOnly ? 'text.secondary' : 'primary.main', fontWeight: 600 }}>
+            {readOnly
+              ? 'Already shipped — the route taken is highlighted. Click any option to preview it on the map.'
+              : 'Not booked yet — pick a route and the map updates live, then choose one to lock it in.'}
+          </Typography>
           <Box sx={{ mt: 1 }}>
             <ScenarioCompareChart scenarios={lane.scenarios} height={220} />
           </Box>
@@ -232,21 +243,21 @@ function DecisionPanel({ laneId, onAdopt, onOpen360 }: { laneId: string; onAdopt
       </Card>
 
       <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' } }}>
-        <ScenarioCard scenario={lane.scenarios.current} />
-        <ScenarioCard scenario={lane.scenarios.best} recommended={lane.recommendedApproach === 'best_co2'} onAdopt={() => adopt(lane.scenarios.best)} />
-        <ScenarioCard scenario={lane.scenarios.balanced} recommended={lane.recommendedApproach === 'balanced'} onAdopt={() => adopt(lane.scenarios.balanced)} />
-        <ScenarioCard scenario={lane.scenarios.optimal} onAdopt={() => adopt(lane.scenarios.optimal)} />
+        <ScenarioCard scenario={lane.scenarios.current} selected={chosenKind === 'current'} onClick={() => onChooseKind('current')} taken={readOnly} />
+        <ScenarioCard scenario={lane.scenarios.best} selected={chosenKind === 'best'} onClick={() => onChooseKind('best')} recommended={lane.recommendedApproach === 'best_co2'} onAdopt={readOnly ? undefined : () => adopt(lane.scenarios.best, 'best')} actionLabel="Choose this route" />
+        <ScenarioCard scenario={lane.scenarios.balanced} selected={chosenKind === 'balanced'} onClick={() => onChooseKind('balanced')} recommended={lane.recommendedApproach === 'balanced'} onAdopt={readOnly ? undefined : () => adopt(lane.scenarios.balanced, 'balanced')} actionLabel="Choose this route" />
+        <ScenarioCard scenario={lane.scenarios.optimal} selected={chosenKind === 'optimal'} onClick={() => onChooseKind('optimal')} onAdopt={readOnly ? undefined : () => adopt(lane.scenarios.optimal, 'optimal')} actionLabel="Choose this route" />
       </Box>
 
       <Card>
         <CardContent>
           <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>Leg breakdown &amp; CO₂e calculation</Typography>
-          <Tabs value={legTab} onChange={(_, v) => setLegTab(v)} sx={{ mb: 1.5, minHeight: 34, '& .MuiTab-root': { minHeight: 34, py: 0.5 } }}>
+          <Tabs value={chosenKind} onChange={(_, v) => onChooseKind(v)} sx={{ mb: 1.5, minHeight: 34, '& .MuiTab-root': { minHeight: 34, py: 0.5 } }}>
             {LEG_TABS.map((t) => (
               <Tab key={t.key} value={t.key} label={t.label} />
             ))}
           </Tabs>
-          <LegTimeline legs={lane.scenarios[legTab].legs} />
+          <LegTimeline legs={lane.scenarios[chosenKind].legs} />
         </CardContent>
       </Card>
     </Stack>

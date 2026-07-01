@@ -8,7 +8,7 @@ import { MapContainer, TileLayer, Polyline, CircleMarker, Marker, Tooltip, useMa
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { Lane, Leg } from '@/types';
-import { MODE_COLORS } from '@/constants/app';
+import { MODE_COLORS, APPROACH_COLORS } from '@/constants/app';
 import { ModeLegend } from '@/components/shared/Chips';
 import { useDataSource } from '@/hooks/useDataSource';
 import { useAsync } from '@/hooks/useAsync';
@@ -75,12 +75,15 @@ export function WorldMap({
   onSelectLane,
   onClear,
   height = 460,
+  scenarioKind = 'current',
 }: {
   lanes: Lane[];
   selectedLaneId?: string | null;
   onSelectLane?: (id: string) => void;
   onClear?: () => void;
   height?: number;
+  /** Which route option to trace for the isolated lane (drives live redraw). */
+  scenarioKind?: 'current' | 'best' | 'balanced' | 'optimal';
 }) {
   const theme = useTheme();
   const dark = theme.palette.mode === 'dark';
@@ -92,7 +95,7 @@ export function WorldMap({
     [selectedLaneId],
   );
   const isolated = Boolean(selectedLaneId && detail && detail.laneId === selectedLaneId);
-  const legs = isolated ? detail!.scenarios.current.legs : NO_LEGS;
+  const legs = isolated ? detail!.scenarios[scenarioKind].legs : NO_LEGS;
 
   // Group view: routed (curved) ocean paths + deduped endpoint markers.
   const group = useMemo(() => {
@@ -274,9 +277,14 @@ export function WorldMap({
             <Typography variant="subtitle2" sx={{ fontWeight: 700, lineHeight: 1.25 }}>
               {detail.origin} → {detail.destCity}
             </Typography>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              {detail.modePath.join(' → ')} · cargo {formatTonnes(totals.cargo)}
-            </Typography>
+            <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mt: 0.25, mb: 1 }} flexWrap="wrap" useFlexGap>
+              <Box component="span" sx={{ px: 0.75, py: 0.1, borderRadius: 1, fontSize: 11, fontWeight: 700, color: '#fff', bgcolor: APPROACH_COLORS[detail.scenarios[scenarioKind].kind] ?? '#5C6B72' }}>
+                {detail.scenarios[scenarioKind].label}
+              </Box>
+              <Typography variant="caption" color="text.secondary">
+                {detail.scenarios[scenarioKind].modePath.join(' → ')} · cargo {formatTonnes(totals.cargo)}
+              </Typography>
+            </Stack>
             <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
               <Metric label="CO₂e" value={formatTonnes(totals.co2e)} />
               <Metric label="Distance" value={formatDistance(totals.km)} />

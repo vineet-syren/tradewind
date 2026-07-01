@@ -10,7 +10,7 @@ import { useDataSource } from '@/hooks/useDataSource';
 import { useAsync } from '@/hooks/useAsync';
 import { useAppSelector } from '@/app/store/hooks';
 import type { Shipment } from '@/types';
-import { APP_TODAY } from '@/constants/app';
+import { APP_TODAY, addDaysISO } from '@/constants/app';
 import { formatTonnes, formatDistance, formatCurrency, formatNumber, formatWeightTonnes, formatIntensity, formatDate } from '@/utils/format';
 
 const STATUS_COLOR: Record<string, 'success' | 'warning' | 'info' | 'default'> = {
@@ -38,8 +38,12 @@ export function ShipmentLedgerSection({ onRowSelect, selectedId, compact = false
   const ds = useDataSource();
   const persona = useAppSelector((s) => s.persona.current);
   const filters = useAppSelector((s) => s.filters.value);
+  // The register is the full shipment book — with no explicit range it shows
+  // both actuals and upcoming (planned) shipments, so upcoming ones can be
+  // selected and re-routed. A user-set range still scopes it.
+  const wideRange = !filters.dateFrom && !filters.dateTo;
   const { data: result, status } = useAsync(
-    () => ds.getShipments({ persona, ...filters, pageSize: 5000, sortBy: 'date', sortDir: 'desc' }),
+    () => ds.getShipments({ persona, ...filters, ...(wideRange ? { dateTo: addDaysISO(APP_TODAY, 400) } : {}), pageSize: 5000, sortBy: 'date', sortDir: 'desc' }),
     [persona, filters],
   );
   const [statusFilter, setStatusFilter] = useState<(typeof STATUSES)[number]>('All');
@@ -60,7 +64,7 @@ export function ShipmentLedgerSection({ onRowSelect, selectedId, compact = false
 
   const period = filters.dateFrom || filters.dateTo
     ? `${filters.dateFrom ? formatDate(filters.dateFrom) : 'start'} – ${filters.dateTo ? formatDate(filters.dateTo) : 'today'}`
-    : `All actuals through ${formatDate(APP_TODAY)}`;
+    : 'All shipments · past + planned';
 
   const allColumns: Column<Shipment>[] = [
     { key: 'date', header: 'Ship date', render: (s) => <Typography variant="body2" sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatDate(s.date)}</Typography>, sortValue: (s) => s.date },

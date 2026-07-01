@@ -14,12 +14,18 @@ export function ScenarioCard({
   onAdopt,
   selected = false,
   onClick,
+  taken = false,
+  actionLabel,
 }: {
   scenario: Scenario;
   recommended?: boolean;
   onAdopt?: () => void;
   selected?: boolean;
   onClick?: () => void;
+  /** Mark this as the route actually taken (past shipments — read-only). */
+  taken?: boolean;
+  /** Override the action button label (e.g. "Choose this route"). */
+  actionLabel?: string;
 }) {
   const color = APPROACH_COLORS[scenario.kind];
   const isCurrent = scenario.kind === 'current';
@@ -48,7 +54,11 @@ export function ScenarioCard({
               {scenario.tagline}
             </Typography>
           </Box>
-          {recommended && <Chip size="small" label="Recommended" sx={{ bgcolor: alpha(color, 0.14), color, fontWeight: 700 }} />}
+          {taken ? (
+            <Chip size="small" label="Route taken" sx={{ bgcolor: alpha('#5C6B72', 0.16), color: '#3A4750', fontWeight: 700 }} />
+          ) : recommended ? (
+            <Chip size="small" label="Recommended" sx={{ bgcolor: alpha(color, 0.14), color, fontWeight: 700 }} />
+          ) : null}
         </Stack>
 
         {/* Mode path */}
@@ -110,7 +120,7 @@ export function ScenarioCard({
             }}
             sx={{ mt: 1.5 }}
           >
-            Adopt {APPROACH_LABEL[scenario.kind]}
+            {actionLabel ?? `Adopt ${APPROACH_LABEL[scenario.kind]}`}
           </Button>
         )}
       </CardContent>
