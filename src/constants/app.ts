@@ -27,6 +27,19 @@ export const MODE_COLORS: Record<string, string> = {
   Air: '#C0392B',
 };
 
+/** GHG Protocol scope colours — distinct hues that still sit within the indigo chrome. */
+export const SCOPE_COLORS: Record<string, string> = {
+  scope1: '#E7A93B', // direct combustion / fleet — amber
+  scope2: '#2FB8A6', // purchased energy — teal
+  scope3: '#5B57E0', // value chain — indigo (dominant)
+};
+
+export const SCOPE_SHORT: Record<string, string> = {
+  scope1: 'Scope 1',
+  scope2: 'Scope 2',
+  scope3: 'Scope 3',
+};
+
 export const APPROACH_COLORS: Record<string, string> = {
   current: '#6B7384',
   optimal: '#C0392B',

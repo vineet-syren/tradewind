@@ -67,18 +67,7 @@ export function KpiCard({ metric }: { metric: KpiMetric }) {
   const DeltaArrow = up ? ArrowUpwardRounded : ArrowDownwardRounded;
 
   return (
-    <Card sx={{ position: 'relative', height: '100%', overflow: 'hidden' }}>
-      {/* intent-coloured top accent */}
-      <Box
-        sx={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          height: 3,
-          background: `linear-gradient(90deg, ${c.main}, ${alpha(c.main, 0.35)})`,
-        }}
-      />
+    <Card sx={{ position: 'relative', height: '100%', overflow: 'hidden', borderLeft: `4px solid ${c.main}` }}>
       <CardContent sx={{ py: 2, '&:last-child': { pb: 2 } }}>
         <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
           <Typography

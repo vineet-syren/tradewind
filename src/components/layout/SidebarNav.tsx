@@ -35,13 +35,16 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
                   borderRadius: 2,
                   mb: 0.25,
                   color: brandTokens.sidebarText,
+                  fontWeight: 500,
                   '& .MuiListItemIcon-root': { color: brandTokens.sidebarMuted, minWidth: 34 },
                   '&.active': {
-                    bgcolor: 'rgba(47,184,166,0.16)',
-                    color: '#FFFFFF',
-                    '& .MuiListItemIcon-root': { color: brandTokens.tealLight },
+                    bgcolor: brandTokens.sidebarActive,
+                    color: brandTokens.sidebarActiveText,
+                    fontWeight: 700,
+                    '& .MuiListItemText-primary': { fontWeight: 700 },
+                    '& .MuiListItemIcon-root': { color: brandTokens.sidebarActiveText },
                   },
-                  '&:hover': { bgcolor: 'rgba(255,255,255,0.06)' },
+                  '&:hover': { bgcolor: 'rgba(27,31,50,0.045)' },
                 }}
               >
                 <ListItemIcon>

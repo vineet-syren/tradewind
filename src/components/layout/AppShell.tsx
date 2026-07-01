@@ -23,7 +23,7 @@ export function AppShell() {
     boxSizing: 'border-box' as const,
     bgcolor: brandTokens.sidebarBg,
     color: brandTokens.sidebarText,
-    borderRight: 'none',
+    borderRight: `1px solid ${brandTokens.line}`,
     overflowX: 'hidden' as const,
   };
 

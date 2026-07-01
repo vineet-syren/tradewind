@@ -12,6 +12,7 @@ export * from './evidence';
 export * from './pulse';
 export * from './exception';
 export * from './footprint';
+export * from './inventory';
 export * from './filters';
 export * from './schedule';
 export * from './copilot';

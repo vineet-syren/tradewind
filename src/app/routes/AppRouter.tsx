@@ -4,6 +4,8 @@ import { AppShell } from '@/components/layout/AppShell';
 
 // Route-level code splitting: each page is its own lazy chunk.
 const CommandCenterPage = lazy(() => import('@/modules/decarbonization/pages/CommandCenterPage'));
+const CarbonOverviewPage = lazy(() => import('@/modules/decarbonization/pages/CarbonOverviewPage'));
+const ScopeDetailPage = lazy(() => import('@/modules/decarbonization/pages/ScopeDetailPage'));
 const ControlTowerPage = lazy(() => import('@/modules/decarbonization/pages/ControlTowerPage'));
 const HotspotsPage = lazy(() => import('@/modules/decarbonization/pages/HotspotsPage'));
 const ProductCustomerLanesPage = lazy(() => import('@/modules/decarbonization/pages/ProductCustomerLanesPage'));
@@ -17,6 +19,10 @@ export function AppRouter() {
       <Routes>
         <Route element={<AppShell />}>
           <Route path="/" element={<CommandCenterPage />} />
+          <Route path="/overview" element={<CarbonOverviewPage />} />
+          <Route path="/scope-1" element={<ScopeDetailPage />} />
+          <Route path="/scope-2" element={<ScopeDetailPage />} />
+          <Route path="/scope-3" element={<ScopeDetailPage />} />
           <Route path="/control-tower" element={<ControlTowerPage />} />
           {/* Everything operational now lives in the Control Tower */}
           <Route path="/shipments" element={<Navigate to="/control-tower" replace />} />

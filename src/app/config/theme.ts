@@ -8,31 +8,37 @@
 import { createTheme, type Theme, type ThemeOptions } from '@mui/material/styles';
 
 export const brandTokens = {
+  // Indigo primary (AI/decisioning accent) on a light, neutral chrome.
+  indigo: '#5B57E0',
+  indigoDark: '#4844C4',
+  indigoLight: '#8B88F0',
+  indigoSoft: '#EEEDFD',
   teal: '#0C8B7B',
-  tealDark: '#0A6E62',
   tealLight: '#2FB8A6',
-  tealSoft: '#E1F3EF',
-  navy: '#0B1F2A',
-  navy2: '#12303E',
-  cream: '#F7FAF9',
+  navy: '#1B1F32',
+  navy2: '#2A3050',
+  cream: '#F6F7FB',
   paper: '#FFFFFF',
-  ink: '#0B1F2A',
-  muted: '#5C6B72',
-  line: '#E6ECEA',
-  sidebarBg: '#0B1F2A',
-  sidebarText: '#C3D2D0',
-  sidebarMuted: '#6E8480',
+  ink: '#1B1F32',
+  muted: '#6B7185',
+  line: '#E8EAF1',
+  // Light sidebar.
+  sidebarBg: '#FFFFFF',
+  sidebarText: '#3C4160',
+  sidebarMuted: '#9096AC',
+  sidebarActive: '#EEEDFD',
+  sidebarActiveText: '#4844C4',
   // Semantic severity (high = bad, low = good).
   high: '#C0392B',
   med: '#C8841B',
   low: '#2E8B6F',
-  radius: 6,
+  radius: 10,
   fontFamily: '"Montserrat", system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif',
 } as const;
 
 const lightPalette: ThemeOptions['palette'] = {
   mode: 'light',
-  primary: { main: brandTokens.teal, dark: brandTokens.tealDark, light: brandTokens.tealLight },
+  primary: { main: brandTokens.indigo, dark: brandTokens.indigoDark, light: brandTokens.indigoLight },
   secondary: { main: brandTokens.navy, light: brandTokens.navy2 },
   success: { main: brandTokens.low },
   warning: { main: brandTokens.med },
@@ -45,7 +51,7 @@ const lightPalette: ThemeOptions['palette'] = {
 
 const darkPalette: ThemeOptions['palette'] = {
   mode: 'dark',
-  primary: { main: '#2FB8A6', dark: brandTokens.teal, light: '#54D0BE' },
+  primary: { main: '#8B88F0', dark: brandTokens.indigo, light: '#ABA8F6' },
   secondary: { main: '#9FB8C0' },
   success: { main: '#4CAF82' },
   warning: { main: '#E0A33A' },

@@ -1195,6 +1195,185 @@ const COPILOT_SUGGESTIONS = [
   { id: 'cs-7', prompt: 'Which customers should we prioritize?' },
 ];
 
+// ── Enterprise carbon inventory: full Scope 1 + 2 + 3 (GHG Protocol) ─────────
+//
+// The transportation module measures Scope 3 Category 9 (downstream transport)
+// bottom-up from shipments. To make the enterprise Overview reconcile with it,
+// Category 9 is ANCHORED to the real per-year shipment totals; every other
+// scope/category is modelled from that anchor with an agri-food profile (a spice
+// exporter is Scope-3-dominant, purchased goods = farmed raw spices are the
+// single biggest source). Numbers stay illustrative until the client shares the
+// wider inventory — same caveat as the transport factors.
+function buildCarbonInventory(shipments) {
+  const YEARS = [2020, 2021, 2022, 2023, 2024, 2025, 2026];
+  const REPORT_YEAR = 2025; // last complete year
+  const TARGET_YEAR = 2030;
+
+  // Category 9 anchor — actual downstream-transport CO₂e per year (2026 partial → annualised).
+  const transportByYear = {};
+  for (const y of YEARS) {
+    const net = shipments.filter((s) => s.year === y).reduce((a, r) => a + r.co2eTonnes, 0);
+    transportByYear[y] = y === LATEST_YEAR ? net * 2 : net; // annualise partial 2026
+  }
+  const T = round(transportByYear[REPORT_YEAR], 1); // Cat 9 reporting-year value
+
+  // Category catalogue — multiplier is × the Cat-9 transport anchor T.
+  // dataQuality: primary = activity data we hold, secondary = supplier/industry, estimated = spend-based.
+  const CATS = [
+    // Scope 1 — direct
+    { id: 's1-stationary', scope: 'scope1', name: 'Stationary combustion', mult: 0.95, dataQuality: 'primary', method: 'Fuel-based (metered)', note: 'Processing boilers, spice dryers and mills at owned facilities.' },
+    { id: 's1-mobile', scope: 'scope1', name: 'Mobile combustion', mult: 0.40, dataQuality: 'primary', method: 'Fuel-based', note: 'Owned collection fleet and yard vehicles.' },
+    { id: 's1-fugitive', scope: 'scope1', name: 'Fugitive emissions', mult: 0.20, dataQuality: 'secondary', method: 'Refrigerant top-up logs', note: 'Refrigerant leakage from cold storage and chillers.' },
+    { id: 's1-process', scope: 'scope1', name: 'Process emissions', mult: 0.05, dataQuality: 'estimated', method: 'Estimated', note: 'Minor process losses in grinding/sterilisation.' },
+    // Scope 2 — purchased energy
+    { id: 's2-electricity', scope: 'scope2', name: 'Purchased electricity', mult: 0.95, dataQuality: 'primary', method: 'Market-based (supplier factors)', note: 'Grid electricity for processing lines and cold storage.' },
+    { id: 's2-steam', scope: 'scope2', name: 'Purchased steam & heat', mult: 0.15, dataQuality: 'secondary', method: 'Supplier-reported', note: 'District steam for sterilisation.' },
+    // Scope 3 — value chain (GHG Protocol categories 1–15)
+    { id: 's3c1', scope: 'scope3', cat: 1, name: 'Purchased goods & services', mult: 9.0, dataQuality: 'estimated', method: 'Spend + supplier factors', note: 'Farmed raw chilli & spices, packaging, ingredients — the dominant source.' },
+    { id: 's3c2', scope: 'scope3', cat: 2, name: 'Capital goods', mult: 0.40, dataQuality: 'estimated', method: 'Spend-based', note: 'Processing equipment and facility capex.' },
+    { id: 's3c3', scope: 'scope3', cat: 3, name: 'Fuel- & energy-related activities', mult: 0.60, dataQuality: 'secondary', method: 'Well-to-tank factors', note: 'Upstream of Scope 1 & 2 fuels not already counted.' },
+    { id: 's3c4', scope: 'scope3', cat: 4, name: 'Upstream transportation & distribution', mult: 1.30, dataQuality: 'primary', method: 'Activity-based', note: 'Inbound haulage from farms and vendors to plants.' },
+    { id: 's3c5', scope: 'scope3', cat: 5, name: 'Waste generated in operations', mult: 0.50, dataQuality: 'secondary', method: 'Waste factors', note: 'Processing residues and packaging waste.' },
+    { id: 's3c6', scope: 'scope3', cat: 6, name: 'Business travel', mult: 0.30, dataQuality: 'secondary', method: 'Distance / spend', note: 'Air and hotel from travel management data.' },
+    { id: 's3c7', scope: 'scope3', cat: 7, name: 'Employee commuting', mult: 0.35, dataQuality: 'estimated', method: 'Survey + averages', note: 'Commuting and remote-work energy.' },
+    { id: 's3c8', scope: 'scope3', cat: 8, name: 'Upstream leased assets', mult: 0.10, dataQuality: 'estimated', method: 'Estimated', note: 'Leased warehousing not in Scope 1/2.' },
+    { id: 's3c9', scope: 'scope3', cat: 9, name: 'Downstream transportation & distribution', mult: 1.0, dataQuality: 'primary', method: 'Activity-based (shipment-level)', note: 'Outbound to customers — measured in the Transportation module.', trackedHere: true },
+    { id: 's3c10', scope: 'scope3', cat: 10, name: 'Processing of sold products', mult: 0.80, dataQuality: 'estimated', method: 'Estimated', note: 'Blending/packing of spices by downstream manufacturers.' },
+    { id: 's3c11', scope: 'scope3', cat: 11, name: 'Use of sold products', mult: 0.05, dataQuality: 'estimated', method: 'Estimated', note: 'Negligible — spices require no energy in use.' },
+    { id: 's3c12', scope: 'scope3', cat: 12, name: 'End-of-life treatment of sold products', mult: 0.60, dataQuality: 'secondary', method: 'Waste factors', note: 'Disposal of packaging after consumer use.' },
+    { id: 's3c13', scope: 'scope3', cat: 13, name: 'Downstream leased assets', mult: 0.05, dataQuality: 'estimated', method: 'Estimated', note: 'Leased retail/coldchain space.' },
+    { id: 's3c14', scope: 'scope3', cat: 14, name: 'Franchises', mult: 0, dataQuality: 'estimated', method: 'Not applicable', note: 'Not applicable to Terova’s model.', relevant: false },
+    { id: 's3c15', scope: 'scope3', cat: 15, name: 'Investments', mult: 0.15, dataQuality: 'estimated', method: 'Estimated', note: 'Minority stakes in sourcing co-operatives.' },
+  ];
+
+  // Per-scope year factor, normalised to 1.0 at the reporting year; earlier years
+  // are higher (progress since baseline). Scope 2 falls fastest (renewables),
+  // Scope 3 slowest (volume growth offsets intensity gains).
+  const lin = (f2020, y) => f2020 + (1 - f2020) * ((y - BASELINE_YEAR) / (REPORT_YEAR - BASELINE_YEAR));
+  const F = { scope1: (y) => lin(1.15, y), scope2: (y) => lin(1.30, y), scope3: (y) => lin(1.06, y) };
+
+  // Current-year value for a category, and its value in any year.
+  const curOf = (c) => (c.id === 's3c9' ? T : round(c.mult * T, 1));
+  const yearVal = (c, y) => (c.id === 's3c9' ? round(transportByYear[y], 1) : round(curOf(c) * F[c.scope](y), 1));
+
+  const totalCurrent = round(CATS.reduce((a, c) => a + curOf(c), 0), 1);
+
+  // Categories with current-year figures + share + trend.
+  const categories = CATS.map((c) => {
+    const cur = curOf(c);
+    const base = yearVal(c, BASELINE_YEAR);
+    return {
+      id: c.id,
+      scope: c.scope,
+      categoryNumber: c.cat ?? null,
+      name: c.name,
+      co2eTonnes: cur,
+      pct: round((cur / totalCurrent) * 100, 1),
+      deltaPctVsBaseline: base > 0 ? round(((cur - base) / base) * 100, 1) : 0,
+      dataQuality: c.dataQuality,
+      method: c.method,
+      note: c.note,
+      relevant: c.relevant !== false,
+      trackedHere: c.trackedHere === true,
+    };
+  });
+
+  // Per-scope share within scope.
+  const scopeTotal = (sid) => round(categories.filter((c) => c.scope === sid).reduce((a, c) => a + c.co2eTonnes, 0), 1);
+  categories.forEach((c) => {
+    const st = scopeTotal(c.scope);
+    c.scopePct = st > 0 ? round((c.co2eTonnes / st) * 100, 1) : 0;
+  });
+
+  const SCOPE_META = {
+    scope1: { label: 'Scope 1 · Direct', description: 'Emissions from sources Terova owns or controls — combustion, fleet and refrigerants.' },
+    scope2: { label: 'Scope 2 · Energy', description: 'Indirect emissions from purchased electricity, steam and heat.' },
+    scope3: { label: 'Scope 3 · Value chain', description: 'All 15 upstream & downstream categories — the vast majority of the footprint.' },
+  };
+  const byScope = ['scope1', 'scope2', 'scope3'].map((sid) => {
+    const cur = scopeTotal(sid);
+    const base = round(categories.filter((c) => c.scope === sid).reduce((a, c) => a + yearVal(CATS.find((x) => x.id === c.id), BASELINE_YEAR), 0), 1);
+    return {
+      scope: sid,
+      label: SCOPE_META[sid].label,
+      description: SCOPE_META[sid].description,
+      co2eTonnes: cur,
+      pct: round((cur / totalCurrent) * 100, 1),
+      deltaPctVsBaseline: base > 0 ? round(((cur - base) / base) * 100, 1) : 0,
+      categoryCount: categories.filter((c) => c.scope === sid && c.relevant).length,
+    };
+  });
+
+  // Year series (stacked by scope) + SBTi-style target path.
+  const scopeYear = (sid, y) => round(CATS.filter((c) => c.scope === sid).reduce((a, c) => a + yearVal(c, y), 0), 1);
+  const total2020 = round(['scope1', 'scope2', 'scope3'].reduce((a, s) => a + scopeYear(s, BASELINE_YEAR), 0), 1);
+  const s12_2020 = round(scopeYear('scope1', BASELINE_YEAR) + scopeYear('scope2', BASELINE_YEAR), 1);
+  const s3_2020 = scopeYear('scope3', BASELINE_YEAR);
+  const target2030 = round(s12_2020 * 0.58 + s3_2020 * 0.75, 1); // -42% S1+2, -25% S3
+  const targetPath = (y) => round(total2020 + (target2030 - total2020) * ((y - BASELINE_YEAR) / (TARGET_YEAR - BASELINE_YEAR)), 1);
+  const byYear = YEARS.map((y) => {
+    const scope1 = scopeYear('scope1', y);
+    const scope2 = scopeYear('scope2', y);
+    const scope3 = scopeYear('scope3', y);
+    return { year: y, scope1, scope2, scope3, total: round(scope1 + scope2 + scope3, 1), targetTotal: targetPath(y) };
+  });
+
+  const totalBaseline = total2020;
+  const onTrack = totalCurrent <= targetPath(REPORT_YEAR);
+
+  // Scope 2 dual reporting + renewables.
+  const s2market = scopeTotal('scope2');
+  const scope2 = {
+    marketBasedTonnes: s2market,
+    locationBasedTonnes: round(s2market / 0.82, 1),
+    renewablePct: 38,
+  };
+
+  // Data-quality mix, weighted by CO₂e.
+  const dqSum = { primary: 0, secondary: 0, estimated: 0 };
+  categories.forEach((c) => (dqSum[c.dataQuality] += c.co2eTonnes));
+  const dq = (k) => round((dqSum[k] / totalCurrent) * 100, 0);
+
+  // Carbon intensity per revenue (illustrative revenue anchor).
+  const revenueUsdM = 128;
+  const intensity = {
+    perRevenue: round(totalCurrent / revenueUsdM, 1),
+    unit: 't CO₂e / $M revenue',
+    revenueUsdM,
+    deltaPct: round(((totalCurrent / revenueUsdM) / (totalBaseline / (revenueUsdM * 0.82)) - 1) * 100, 1),
+  };
+
+  return {
+    reportingYear: REPORT_YEAR,
+    baselineYear: BASELINE_YEAR,
+    asOf: AS_OF.toISOString().slice(0, 10),
+    company: 'Terova',
+    totalCo2eTonnes: totalCurrent,
+    totalBaselineTonnes: totalBaseline,
+    deltaPctVsBaseline: round(((totalCurrent - totalBaseline) / totalBaseline) * 100, 1),
+    byScope,
+    categories,
+    byYear,
+    scope2,
+    intensity,
+    dataQuality: { primaryPct: dq('primary'), secondaryPct: dq('secondary'), estimatedPct: dq('estimated') },
+    target: {
+      name: 'SBTi 1.5°C-aligned near-term target',
+      baseYear: BASELINE_YEAR,
+      targetYear: TARGET_YEAR,
+      scope12ReductionPct: 42,
+      scope3ReductionPct: 25,
+      targetTotalTonnes: target2030,
+      onTrack,
+      milestoneTonnes: targetPath(REPORT_YEAR),
+      gapTonnes: round(totalCurrent - targetPath(REPORT_YEAR), 0),
+      status: onTrack
+        ? 'On track against the linear reduction path.'
+        : `Behind the path — ${round(totalCurrent - targetPath(REPORT_YEAR), 0)} t CO₂e above the ${REPORT_YEAR} milestone, driven by Scope 3.`,
+    },
+  };
+}
+
 // ── Write everything ─────────────────────────────────────────────────────────
 function writeJson(relPath, data) {
   const full = join(OUT, relPath);
@@ -1307,6 +1486,7 @@ function main() {
   writeJson('hotspots.json', buildHotspots(shipments));
   writeJson('partners.json', buildPartners(shipments, recs));
   writeJson('evidence.json', buildEvidence(shipments));
+  writeJson('carbon-inventory.json', buildCarbonInventory(shipments));
   writeJson('pulse.json', buildPulse(lanes, recs, allShipments));
   writeJson('exceptions.json', buildExceptions(shipments, lanes));
   writeJson('emission-factors.json', EMISSION_FACTORS);

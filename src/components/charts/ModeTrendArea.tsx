@@ -22,7 +22,7 @@ export function ModeTrendArea({ data, height = 280 }: { data: MonthModeRow[]; he
         <Tooltip formatter={(v: number, n) => [formatTonnes(v), n as string]} labelFormatter={(l) => `Month: ${l}`} contentStyle={{ borderRadius: 10, fontSize: 12 }} />
         <Legend wrapperStyle={{ fontSize: 11 }} />
         {MODES.map((m) => (
-          <Area key={m} type="monotone" dataKey={m} stackId="1" stroke={MODE_COLORS[m]} fill={MODE_COLORS[m]} fillOpacity={0.7} />
+          <Area key={m} type="monotone" dataKey={m} stackId="1" stroke={MODE_COLORS[m]} fill={MODE_COLORS[m]} fillOpacity={0.7} isAnimationActive={false} />
         ))}
       </AreaChart>
     </ResponsiveContainer>

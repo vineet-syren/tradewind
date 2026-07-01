@@ -8,6 +8,7 @@ import type { CarbonDataSource, ScopeParams } from '@/services/dataSource';
 import type {
   AgentCatalogEntry,
   Assumptions,
+  CarbonInventory,
   CopilotResult,
   CopilotSuggestion,
   EmissionFactorRow,
@@ -66,6 +67,7 @@ export class ApiDataSource implements CarbonDataSource {
   getHotspots = (params?: ScopeParams) => this.get<Hotspots>('/hotspots', { persona: params?.persona, ...params?.filters });
   getPartners = (params?: ScopeParams) => this.get<Partners>('/partners', { persona: params?.persona, ...params?.filters });
   getEvidence = () => this.get<EsgEvidence>('/evidence');
+  getCarbonInventory = () => this.get<CarbonInventory>('/carbon-inventory');
   getPulse = (params?: ScopeParams) => this.get<PulseEvent[]>('/pulse', { persona: params?.persona });
   getExceptions = (params?: ScopeParams) => this.get<ExceptionItem[]>('/exceptions', { persona: params?.persona });
   getSchedule = (params?: ScopeParams) => this.get<ScheduleSummary>('/schedule', { persona: params?.persona, ...params?.filters });

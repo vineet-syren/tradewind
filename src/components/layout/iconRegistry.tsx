@@ -19,6 +19,9 @@ import TrainRoundedIcon from '@mui/icons-material/TrainRounded';
 import LocalShippingRoundedIcon from '@mui/icons-material/LocalShippingRounded';
 import DirectionsCarRoundedIcon from '@mui/icons-material/DirectionsCarRounded';
 import HelpOutlineRoundedIcon from '@mui/icons-material/HelpOutlineRounded';
+import DonutLargeRoundedIcon from '@mui/icons-material/DonutLargeRounded';
+import FactoryRoundedIcon from '@mui/icons-material/FactoryRounded';
+import AccountTreeRoundedIcon from '@mui/icons-material/AccountTreeRounded';
 import type { SvgIconProps } from '@mui/material/SvgIcon';
 
 const REGISTRY: Record<string, (p: SvgIconProps) => ReactElement> = {
@@ -37,6 +40,10 @@ const REGISTRY: Record<string, (p: SvgIconProps) => ReactElement> = {
   evidence: (p) => <FactCheckRoundedIcon {...p} />,
   methodology: (p) => <FunctionsRoundedIcon {...p} />,
   consolidation: (p) => <Inventory2RoundedIcon {...p} />,
+  overview: (p) => <DonutLargeRoundedIcon {...p} />,
+  scope1: (p) => <FactoryRoundedIcon {...p} />,
+  scope2: (p) => <BoltRoundedIcon {...p} />,
+  scope3: (p) => <AccountTreeRoundedIcon {...p} />,
 };
 
 export function NavIcon({ iconKey, ...props }: { iconKey: string } & SvgIconProps): ReactElement {
