@@ -12,7 +12,6 @@ import type { CarbonDataSource, ScopeParams } from '@/services/dataSource';
 import type {
   AgentCatalogEntry,
   Assumptions,
-  CarbonInventory,
   CopilotResult,
   CopilotSuggestion,
   EmissionFactorRow,
@@ -97,7 +96,6 @@ export class MockDataSource implements CarbonDataSource {
   private loadLanes = once(async () => (await fetchJson<{ items: Lane[] }>('lanes/index.json')).items);
   private loadRecommendations = once(() => fetchJson<Recommendation[]>('recommendations.json'));
   private loadEvidence = once(() => fetchJson<EsgEvidence>('evidence.json'));
-  private loadCarbonInventory = once(() => fetchJson<CarbonInventory>('carbon-inventory.json'));
   private loadPulse = once(() => fetchJson<PulseEvent[]>('pulse.json'));
   private loadExceptions = once(() => fetchJson<ExceptionItem[]>('exceptions.json'));
   private loadAssumptions = once(() => fetchJson<Assumptions>('assumptions.json'));
@@ -187,10 +185,6 @@ export class MockDataSource implements CarbonDataSource {
   async getEvidence(): Promise<EsgEvidence> {
     await delay('normal');
     return this.loadEvidence();
-  }
-  async getCarbonInventory(): Promise<CarbonInventory> {
-    await delay('normal');
-    return this.loadCarbonInventory();
   }
   async getPulse(params?: ScopeParams): Promise<PulseEvent[]> {
     await delay('fast');

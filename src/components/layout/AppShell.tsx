@@ -5,6 +5,7 @@ import { Outlet } from 'react-router-dom';
 import { TopBar } from './TopBar';
 import { SidebarNav } from './SidebarNav';
 import { DrawerHost } from './DrawerHost';
+import { CopilotDock } from './CopilotDock';
 import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
 import { setSidebarOpen } from '@/app/store/uiSlice';
 import { RouteFallback } from '@/components/loaders/RouteFallback';
@@ -19,11 +20,12 @@ export function AppShell() {
   const theme = useTheme();
   const isDesktop = useMediaQuery(theme.breakpoints.up('md'));
 
-  const navyPaperSx = {
+  const isDark = theme.palette.mode === 'dark';
+  const sidebarPaperSx = {
     boxSizing: 'border-box' as const,
-    bgcolor: brandTokens.sidebarBg,
-    color: brandTokens.sidebarText,
-    borderRight: `1px solid ${brandTokens.line}`,
+    bgcolor: isDark ? 'background.paper' : brandTokens.sidebarBg,
+    color: isDark ? 'text.secondary' : brandTokens.sidebarText,
+    borderRight: `1px solid ${isDark ? theme.palette.divider : brandTokens.line}`,
     overflowX: 'hidden' as const,
   };
 
@@ -39,7 +41,7 @@ export function AppShell() {
           flexShrink: 0,
           whiteSpace: 'nowrap',
           '& .MuiDrawer-paper': {
-            ...navyPaperSx,
+            ...sidebarPaperSx,
             width: sidebarOpen ? DRAWER_WIDTH : 0,
             transition: (t) =>
               t.transitions.create('width', {
@@ -61,7 +63,7 @@ export function AppShell() {
         open={sidebarOpen && !isDesktop}
         onClose={() => dispatch(setSidebarOpen(false))}
         ModalProps={{ keepMounted: true }}
-        sx={{ display: { xs: 'block', md: 'none' }, '& .MuiDrawer-paper': { width: DRAWER_WIDTH, ...navyPaperSx } }}
+        sx={{ display: { xs: 'block', md: 'none' }, '& .MuiDrawer-paper': { width: DRAWER_WIDTH, ...sidebarPaperSx } }}
       >
         <Toolbar />
         <Box sx={{ overflow: 'auto', py: 1.25 }}>
@@ -79,6 +81,7 @@ export function AppShell() {
       </Box>
 
       <DrawerHost />
+      <CopilotDock />
     </Box>
   );
 }

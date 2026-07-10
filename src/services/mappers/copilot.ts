@@ -27,7 +27,7 @@ export interface CopilotContext {
 
 const actionFromRec = (r: Recommendation): CopilotAction => ({
   id: `ca-${r.id}`,
-  label: `Execute: ${r.title}`,
+  label: `Suggestion: ${r.title}`,
   type: r.type,
   laneId: r.laneId,
   shipmentId: r.shipmentId,
@@ -39,7 +39,11 @@ const actionFromRec = (r: Recommendation): CopilotAction => ({
 export function composeCopilotReply(prompt: string, ctx: CopilotContext): CopilotResult {
   const q = prompt.toLowerCase();
   const { footprint: f, lanes, recommendations: recs, hotspots, evidence } = ctx;
-  const has = (...words: string[]) => words.some((w) => q.includes(w));
+  // Whole-word matching — "fair"/"dairy" must NOT trigger the 'air' branch.
+  // Word-boundary matching so "fair" never triggers 'air' — with an optional
+  // plural/possessive tail so "partners", "carriers", "lanes" still match.
+  const has = (...words: string[]) =>
+    words.some((w) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:s|es|'s)?\\b`, 'i').test(q));
 
   // ── Air exceptions ─────────────────────────────────────────────────────
   if (has('air', 'avoidable', 'exception')) {
@@ -152,21 +156,33 @@ export function composeCopilotReply(prompt: string, ctx: CopilotContext): Copilo
     };
   }
 
-  // ── Default: footprint summary ─────────────────────────────────────────
+  // ── Footprint summary (recognised generic intents only) ────────────────
+  if (has('footprint', 'summary', 'overview', 'total', 'emission', 'emissions', 'co2', 'co₂e', 'carbon', 'how much')) {
+    return {
+      headline: `${formatTonnes(f.annualCo2eTonnes)}/yr downstream transport footprint`,
+      answer: `Terova's downstream transportation footprint is about ${formatTonnes(f.annualCo2eTonnes)}/yr across ${f.laneCount} lanes. ${formatTonnes(f.reductionOpportunityTonnes)}/yr (${formatPercent(f.reductionOpportunityPct)}) is realizable, with ${formatPercent(f.realizedReductionPct)} already realized against baseline. Ask about hotspots, lanes, air exceptions, partners or progress.`,
+      insights: [
+        { label: 'Annual CO₂e', value: `${formatTonnes(f.annualCo2eTonnes)}`, intent: 'neutral' },
+        { label: 'Opportunity', value: `${formatTonnes(f.reductionOpportunityTonnes)}/yr`, intent: 'opportunity' },
+        { label: 'Realized', value: formatPercent(f.realizedReductionPct), intent: 'positive' },
+      ],
+      view: {
+        kind: 'lanes',
+        title: 'Highest-potential lanes',
+        lanes: [...lanes].sort((a, b) => b.realizableReductionTonnes - a.realizableReductionTonnes).slice(0, 6),
+      },
+      actions: [],
+      followups: ['Where are my biggest hotspots?', 'Recommend the best CO₂ actions', 'Show me avoidable air shipments'],
+    };
+  }
+
+  // ── Honest fallback: never pretend to understand ───────────────────────
   return {
-    headline: `${formatTonnes(f.annualCo2eTonnes)}/yr downstream transport footprint`,
-    answer: `Terova's downstream transportation footprint is about ${formatTonnes(f.annualCo2eTonnes)}/yr across ${f.laneCount} lanes. ${formatTonnes(f.reductionOpportunityTonnes)}/yr (${formatPercent(f.reductionOpportunityPct)}) is realizable, with ${formatPercent(f.realizedReductionPct)} already realized against baseline. Ask about hotspots, lanes, air exceptions, partners or progress.`,
-    insights: [
-      { label: 'Annual CO₂e', value: `${formatTonnes(f.annualCo2eTonnes)}`, intent: 'neutral' },
-      { label: 'Opportunity', value: `${formatTonnes(f.reductionOpportunityTonnes)}/yr`, intent: 'opportunity' },
-      { label: 'Realized', value: formatPercent(f.realizedReductionPct), intent: 'positive' },
-    ],
-    view: {
-      kind: 'lanes',
-      title: 'Highest-potential lanes',
-      lanes: [...lanes].sort((a, b) => b.realizableReductionTonnes - a.realizableReductionTonnes).slice(0, 6),
-    },
+    headline: "I don't have a grounded answer for that",
+    answer: `I answer only from the shipment data in view, and I couldn't map "${prompt}" to a topic I cover — footprint, hotspots, lanes, air exceptions, carriers & vendors, mode split, or progress to the ambition. Try one of the prompts below, or rephrase around one of those topics.`,
+    insights: [],
+    view: { kind: 'none' },
     actions: [],
-    followups: ['Where are my biggest hotspots?', 'Recommend the best CO₂ actions', 'Show me avoidable air shipments'],
+    followups: ['Where are my biggest hotspots?', 'Recommend the best CO₂ actions', 'What is our progress toward the ambition?'],
   };
 }

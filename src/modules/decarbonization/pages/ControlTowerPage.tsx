@@ -1,18 +1,17 @@
-import { useMemo, useState } from 'react';
-import { Box, Tab, Tabs } from '@mui/material';
-import RouteRounded from '@mui/icons-material/RouteRounded';
-import BoltRounded from '@mui/icons-material/BoltRounded';
-import FactCheckRounded from '@mui/icons-material/FactCheckRounded';
+import { useMemo } from 'react';
+import { Box, Card } from '@mui/material';
+import FilterAltRoundedIcon from '@mui/icons-material/FilterAltRounded';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ScopeNote } from '@/components/layout/ScopeNote';
 import { FilterPanel } from '@/components/filters/FilterPanel';
+import { EmptyState } from '@/components/shared/EmptyState';
+import { ScopePrompt } from '@/components/filters/ScopePrompt';
 import { ValueHero, type HeroPart } from '@/components/cards/ValueHero';
 import { ShipmentsPanel } from '@/modules/decarbonization/components/ShipmentsPanel';
-import { ReducePanel } from '@/modules/decarbonization/components/ReducePanel';
-import { ActionsPanel } from '@/modules/decarbonization/components/ActionsPanel';
 import { useDataSource } from '@/hooks/useDataSource';
 import { useAsync } from '@/hooks/useAsync';
 import { useAppSelector } from '@/app/store/hooks';
+import { countActiveFilters } from '@/app/store/filtersSlice';
 import type { ActionType } from '@/types';
 
 const TYPE_LABEL: Record<string, string> = {
@@ -25,15 +24,14 @@ const TYPE_LABEL: Record<string, string> = {
   'vendor-intervention': 'vendor governance',
 };
 
-type HubTab = 'shipments' | 'reduce' | 'actions';
-
 export default function ControlTowerPage() {
   const ds = useDataSource();
   const persona = useAppSelector((s) => s.persona.current);
   const filters = useAppSelector((s) => s.filters.value);
-  const { data: lanes } = useAsync(() => ds.getLanes({ filters }), [filters]);
-  const { data: recs } = useAsync(() => ds.getRecommendations({ persona, filters }), [persona, filters]);
-  const [tab, setTab] = useState<HubTab>('shipments');
+  // The tower stays empty until the user scopes it — no filters, no data pull.
+  const hasFilters = countActiveFilters(filters) > 0;
+  const { data: lanes } = useAsync(() => (hasFilters ? ds.getLanes({ filters }) : Promise.resolve([])), [filters]);
+  const { data: recs } = useAsync(() => (hasFilters ? ds.getRecommendations({ persona, filters }) : Promise.resolve([])), [persona, filters]);
 
   const hero = useMemo(() => {
     const open = recs ?? [];
@@ -50,30 +48,28 @@ export default function ControlTowerPage() {
 
   return (
     <Box>
-      {/* Change 2 — value-on-the-table hero sits above everything */}
-      <ValueHero totalTonnes={hero.total} parts={hero.parts} recCount={hero.recCount} />
+      {hasFilters && <ValueHero totalTonnes={hero.total} parts={hero.parts} recCount={hero.recCount} />}
 
       <PageHeader
-        overline="Operate · Decarbonization Control Tower"
+        overline="Visibility · Live shipment network"
         title="Control Tower"
-        subtitle="One place to see every shipment, decide its route, work the reduction backlog and track what's been actioned — visibility, decisioning and execution together."
+        subtitle="Live visibility over every shipment and route, with suggested greener options for what's still to be planned. Decisions and bookings stay in your own systems — this view shows what each option is worth."
         actions={<ScopeNote />}
       />
       <FilterPanel />
 
-      <Tabs
-        value={tab}
-        onChange={(_, v) => setTab(v as HubTab)}
-        sx={{ mb: 2.5, borderBottom: 1, borderColor: 'divider', '& .MuiTab-root': { textTransform: 'none', fontWeight: 600, minHeight: 48 } }}
-      >
-        <Tab value="shipments" icon={<RouteRounded sx={{ fontSize: 18 }} />} iconPosition="start" label="Shipments & routes" />
-        <Tab value="reduce" icon={<BoltRounded sx={{ fontSize: 18 }} />} iconPosition="start" label="Reduce & plan" />
-        <Tab value="actions" icon={<FactCheckRounded sx={{ fontSize: 18 }} />} iconPosition="start" label="Action tracker" />
-      </Tabs>
-
-      {tab === 'shipments' && <ShipmentsPanel />}
-      {tab === 'reduce' && <ReducePanel />}
-      {tab === 'actions' && <ActionsPanel />}
+      {!hasFilters ? (
+        <Card>
+          <EmptyState
+            icon={<FilterAltRoundedIcon sx={{ fontSize: 44 }} />}
+            title="Apply a filter to load the tower"
+            description="Pick a period, region, market, product, mode or customer above — the shipment network and route suggestions load once the view is scoped."
+          />
+          <ScopePrompt />
+        </Card>
+      ) : (
+        <ShipmentsPanel />
+      )}
     </Box>
   );
 }

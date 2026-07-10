@@ -25,3 +25,11 @@ const filtersSlice = createSlice({
 
 export const { setFilters, patchFilters, clearFilters } = filtersSlice.actions;
 export default filtersSlice.reducer;
+
+/**
+ * A filter counts as applied iff it is a non-empty array or a truthy scalar —
+ * `patchFilters` leaves empty keys behind, so key existence is not reliable.
+ */
+export function countActiveFilters(filters: ShipmentFilters): number {
+  return Object.values(filters).filter((v) => (Array.isArray(v) ? v.length > 0 : Boolean(v))).length;
+}

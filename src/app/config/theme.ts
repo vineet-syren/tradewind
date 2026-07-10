@@ -1,39 +1,40 @@
 /**
  * Brand theme — the single source of brand/foundation tokens for Tradewind.
  *
- * Palette: deep teal-green (decarbonization) on warm cream with ocean navy —
- * distinct from the reference app's coral, fitting a carbon/ocean product.
- * Feature components consume the MUI theme + semantic tokens, never raw hex.
+ * Palette: clean analytics chrome — Inter on white cards over a soft gray
+ * canvas, indigo as the single decisioning accent, emerald/amber/rose as
+ * semantic outcome colours. Feature components consume the MUI theme +
+ * semantic tokens, never raw hex.
  */
 import { createTheme, type Theme, type ThemeOptions } from '@mui/material/styles';
 
 export const brandTokens = {
   // Indigo primary (AI/decisioning accent) on a light, neutral chrome.
-  indigo: '#5B57E0',
-  indigoDark: '#4844C4',
-  indigoLight: '#8B88F0',
-  indigoSoft: '#EEEDFD',
-  teal: '#0C8B7B',
-  tealLight: '#2FB8A6',
-  navy: '#1B1F32',
-  navy2: '#2A3050',
-  cream: '#F6F7FB',
+  indigo: '#4f46e5',
+  indigoDark: '#4338ca',
+  indigoLight: '#6366f1',
+  indigoSoft: '#eef2ff',
+  teal: '#10b981',
+  tealLight: '#34d399',
+  navy: '#111827',
+  navy2: '#1f2937',
+  cream: '#f9fafb',
   paper: '#FFFFFF',
-  ink: '#1B1F32',
-  muted: '#6B7185',
-  line: '#E8EAF1',
+  ink: '#111827',
+  muted: '#6b7280',
+  line: '#e5e7eb',
   // Light sidebar.
   sidebarBg: '#FFFFFF',
-  sidebarText: '#3C4160',
-  sidebarMuted: '#9096AC',
-  sidebarActive: '#EEEDFD',
-  sidebarActiveText: '#4844C4',
+  sidebarText: '#374151',
+  sidebarMuted: '#9ca3af',
+  sidebarActive: '#eef2ff',
+  sidebarActiveText: '#4338ca',
   // Semantic severity (high = bad, low = good).
-  high: '#C0392B',
-  med: '#C8841B',
-  low: '#2E8B6F',
+  high: '#ef4444',
+  med: '#f59e0b',
+  low: '#10b981',
   radius: 10,
-  fontFamily: '"Montserrat", system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif',
+  fontFamily: '"Inter", system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif',
 } as const;
 
 const lightPalette: ThemeOptions['palette'] = {
@@ -43,7 +44,7 @@ const lightPalette: ThemeOptions['palette'] = {
   success: { main: brandTokens.low },
   warning: { main: brandTokens.med },
   error: { main: brandTokens.high },
-  info: { main: '#1E6E8C' },
+  info: { main: '#3b82f6' },
   background: { default: brandTokens.cream, paper: brandTokens.paper },
   text: { primary: brandTokens.ink, secondary: brandTokens.muted },
   divider: brandTokens.line,
@@ -51,15 +52,15 @@ const lightPalette: ThemeOptions['palette'] = {
 
 const darkPalette: ThemeOptions['palette'] = {
   mode: 'dark',
-  primary: { main: '#8B88F0', dark: brandTokens.indigo, light: '#ABA8F6' },
-  secondary: { main: '#9FB8C0' },
-  success: { main: '#4CAF82' },
-  warning: { main: '#E0A33A' },
-  error: { main: '#E26A5A' },
-  info: { main: '#5BA9C2' },
-  background: { default: '#091620', paper: '#0F2531' },
-  text: { primary: '#EAF1F0', secondary: '#9DB0B2' },
-  divider: 'rgba(234, 241, 240, 0.12)',
+  primary: { main: '#818cf8', dark: brandTokens.indigo, light: '#a5b4fc' },
+  secondary: { main: '#94a3b8' },
+  success: { main: '#34d399' },
+  warning: { main: '#fbbf24' },
+  error: { main: '#f87171' },
+  info: { main: '#60a5fa' },
+  background: { default: '#0f172a', paper: '#1e293b' },
+  text: { primary: '#f1f5f9', secondary: '#94a3b8' },
+  divider: 'rgba(241, 245, 249, 0.12)',
 };
 
 export function createAppTheme(mode: 'light' | 'dark'): Theme {
@@ -69,16 +70,18 @@ export function createAppTheme(mode: 'light' | 'dark'): Theme {
     shape: { borderRadius: brandTokens.radius },
     typography: {
       fontFamily: brandTokens.fontFamily,
+      // Global size bump — MUI scales every rem-based variant from this base (default 14).
+      fontSize: 15.5,
       fontWeightLight: 300,
       fontWeightRegular: 400,
       fontWeightMedium: 500,
-      h4: { fontWeight: 500, letterSpacing: '-0.01em' },
-      h5: { fontWeight: 600, letterSpacing: '-0.01em' },
-      h6: { fontWeight: 600 },
+      h4: { fontWeight: 700, letterSpacing: '-0.02em' },
+      h5: { fontWeight: 700, letterSpacing: '-0.02em' },
+      h6: { fontWeight: 600, letterSpacing: '-0.01em' },
       subtitle1: { fontWeight: 600 },
       subtitle2: { fontWeight: 600 },
-      button: { textTransform: 'none', fontWeight: 500 },
-      overline: { letterSpacing: '0.14em', fontWeight: 600 },
+      button: { textTransform: 'none', fontWeight: 600 },
+      overline: { letterSpacing: '0.12em', fontWeight: 600 },
     },
     components: {
       MuiPaper: { styleOverrides: { root: { backgroundImage: 'none' } } },
@@ -86,9 +89,9 @@ export function createAppTheme(mode: 'light' | 'dark'): Theme {
         defaultProps: { elevation: 0 },
         styleOverrides: {
           root: {
-            border: `1px solid ${isDark ? 'rgba(234,241,240,0.10)' : brandTokens.line}`,
-            borderRadius: brandTokens.radius + 3,
-            boxShadow: isDark ? 'none' : '0 1px 2px rgba(11,31,42,.04), 0 8px 28px rgba(11,31,42,.05)',
+            border: `1px solid ${isDark ? 'rgba(241,245,249,0.10)' : brandTokens.line}`,
+            borderRadius: brandTokens.radius + 2,
+            boxShadow: isDark ? 'none' : '0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.06)',
           },
         },
       },
@@ -104,7 +107,7 @@ export function createAppTheme(mode: 'light' | 'dark'): Theme {
             whiteSpace: 'nowrap',
             textTransform: 'uppercase',
             letterSpacing: '0.08em',
-            fontSize: 10.5,
+            fontSize: 12,
           },
         },
       },

@@ -11,7 +11,7 @@
  *
  * Methodology (from the customer's calc screenshot + the architect call):
  *   CO2e (kg) = Weight (tonnes) × Distance (km) × Emission Factor (kg/tonne-km)
- *   Distance  = Haversine straight-line × 1.20 (deviation buffer)
+ *   Distance  = great-circle × mode route factor (ocean 1.45, road 1.3, rail 1.25, air 1.05)
  *   EF is mode- and distance-tiered. Consolidated containers attribute CO2e by
  *   the shipment's weight share.
  *
@@ -142,8 +142,13 @@ function haversineKm(a, b) {
   const c = 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
   return R_EARTH * c;
 }
-/** Straight-line Haversine + 20% deviation buffer (customer methodology). */
-const distanceKm = (a, b) => round(haversineKm(a, b) * 1.2, 1);
+/**
+ * Mode-specific route deviation factors over great-circle distance.
+ * Ocean reflects port-to-port shipping networks (e.g. Suez transits ≫ straight
+ * line); road/rail reflect network wind; air flies near-direct.
+ */
+const DEVIATION = { ocean: 1.45, road: 1.3, rail: 1.25, air: 1.05 };
+const distanceKm = (a, b, mode = 'road') => round(haversineKm(a, b) * (DEVIATION[mode] ?? 1.3), 1);
 
 /**
  * Emission factor in kg CO2e per tonne-km, mode- and distance-tiered.
@@ -298,15 +303,15 @@ for (let y = BASELINE_YEAR; y <= LATEST_YEAR; y++)
   }
 
 // Reduction program ramp: realized % reduction applied to a lane in a month.
-// Pilot starts 2023-07; ramps from ~2% toward ~14% by mid-2026 (the structured
-// reduction journey toward the 10–20% ambition — not a month-one promise).
+// Pilot starts 2023-07; ramps from ~2% toward ~9% by mid-2026 — mid-journey
+// against the 10–20% ambition, so the target still has road left to run.
 function realizedReductionPct(period) {
   const [y, m] = period.split('-').map(Number);
   const idx = (y - BASELINE_YEAR) * 12 + (m - 1);
   const pilotStart = (2023 - BASELINE_YEAR) * 12 + 6; // 2023-07
   if (idx < pilotStart) return 0;
   const ramp = (idx - pilotStart) / 35; // → 1.0 by 2026-06
-  return clamp(0.02 + ramp * 0.12, 0, 0.14);
+  return clamp(0.02 + ramp * 0.07, 0, 0.09);
 }
 
 // Live status from the shipment's ship date + ETA relative to "today".
@@ -321,7 +326,7 @@ function statusForDates(date, eta) {
 function makeLeg(seq, mode, fromName, toName, weightTonnes, opts = {}) {
   const from = opts.from ?? GEO[fromName];
   const to = opts.to ?? GEO[toName];
-  const km = opts.km ?? distanceKm(from, to);
+  const km = opts.km ?? distanceKm(from, to, mode);
   const ef = efPerTonneKm(mode, km);
   const co2e = legCo2eTonnes(mode, km, weightTonnes);
   return {
@@ -333,7 +338,7 @@ function makeLeg(seq, mode, fromName, toName, weightTonnes, opts = {}) {
     fromCoord: { lat: from.lat, lon: from.lon },
     toCoord: { lat: to.lat, lon: to.lon },
     distanceKm: round(km, 1),
-    distanceSource: opts.distanceSource ?? 'Haversine + 20%',
+    distanceSource: opts.distanceSource ?? `Great-circle × ${DEVIATION[mode] ?? 1.3} (${mode} route factor)`,
     distanceTier: distanceTier(km),
     emissionFactor: ef,
     efUnit: 'kg CO₂e / tonne-km',
@@ -387,7 +392,7 @@ function buildScenarios(base) {
   const bestLegs = [
     makeLeg(1, 'rail', origin, nearer, W),
     makeLeg(2, 'ocean', nearer, destPort, W),
-    makeLeg(3, 'rail', destPort, destCity, W, { to: destCoord, km: distanceKm(GEO[destPort], destCoord) }),
+    makeLeg(3, 'rail', destPort, destCity, W, { to: destCoord, km: distanceKm(GEO[destPort], destCoord, 'rail') }),
   ];
   // Consolidation + slow-steaming efficiency: trim ocean leg CO2e ~6%.
   bestLegs[1].co2eTonnes = round(bestLegs[1].co2eTonnes * 0.94, 3);
@@ -396,14 +401,14 @@ function buildScenarios(base) {
   const balancedLegs = [
     makeLeg(1, 'rail', origin, originPort, W),
     makeLeg(2, 'ocean', originPort, destPort, W),
-    makeLeg(3, 'road', destPort, destCity, W, { to: destCoord, km: distanceKm(GEO[destPort], destCoord) * 0.9 }),
+    makeLeg(3, 'road', destPort, destCity, W, { to: destCoord, km: distanceKm(GEO[destPort], destCoord, 'road') * 0.9 }),
   ];
 
   // ----- OPTIMAL -----  multimodal/air-heavy: fastest, highest CO2
   const optimalLegs = [
     makeLeg(1, 'road', origin, originPort, W),
     makeLeg(2, 'air', originPort, destPort, W),
-    makeLeg(3, 'road', destPort, destCity, W, { to: destCoord, km: distanceKm(GEO[destPort], destCoord) }),
+    makeLeg(3, 'road', destPort, destCity, W, { to: destCoord, km: distanceKm(GEO[destPort], destCoord, 'road') }),
   ];
 
   const mk = (kind, legs, opts) => {
@@ -449,7 +454,8 @@ function buildScenarios(base) {
   const balanced = mk('balanced', balancedLegs, {
     label: 'Balanced',
     dwell: 5,
-    costMult: 0.82,
+    // Rail-to-port + optimized delivery is roughly cost-neutral vs road+ocean.
+    costMult: 0.98,
     tagline: 'Road + ocean optimized — 2–3 weeks, balanced CO₂',
     transitBand: '2–3 weeks',
     slaRisk: 'Low',
@@ -459,7 +465,9 @@ function buildScenarios(base) {
   const best = mk('best_co2', bestLegs, {
     label: 'Best for CO₂',
     dwell: 8,
-    costMult: 0.74,
+    // Consolidation + slow steaming trims freight slightly — but the longer
+    // transit carries inventory cost, so the net saving is modest, not magic.
+    costMult: 0.95,
     tagline: 'Ocean-heavy + rail inland + consolidation — lowest CO₂',
     transitBand: '4–6 weeks',
     slaRisk: 'Higher (longer transit)',
@@ -679,7 +687,14 @@ function buildLanes(shipments) {
     // by the lane's annual trip frequency.
     const repMembers = oceanMembers.length ? oceanMembers : members;
     const repWeight = Math.max(9, round(repMembers.reduce((s, m) => s + m.weightTonnes, 0) / repMembers.length, 2));
-    const annualFrequency = Math.max(1, Math.round(repMembers.reduce((s, m) => s + m.monthlyTrips, 0) / 3));
+    // Annualize from OBSERVED lane throughput: shipments since the lane first
+    // ran, measured to "today" — so a lane that shipped 3 times in one year
+    // two years ago is ~1.5/yr, not 3/yr, and the network's summed annual
+    // activity stays consistent with what it actually ships.
+    const memberDates = members.map((m) => new Date(`${m.date}T00:00:00Z`).getTime());
+    const asOfMs = new Date(`${AS_OF_ISO}T00:00:00Z`).getTime();
+    const spanYears = clamp((asOfMs - Math.min(...memberDates)) / (365.25 * 86_400_000), 1, 7);
+    const annualFrequency = Math.max(1, Math.round(shipmentCount / spanYears));
     const avgCo2ePerTonne = round(totalCo2eTonnes / Math.max(totalWeightTonnes, 0.001), 3);
     const totalTonKm = members.reduce((s, m) => s + m.weightTonnes * m.totalDistanceKm, 0);
     const avgCo2ePerTonneKm = round((totalCo2eTonnes * 1e6) / Math.max(totalTonKm, 0.001), 1); // g CO₂e/t·km
@@ -696,9 +711,15 @@ function buildLanes(shipments) {
       isAir: false,
     });
 
+    // What the lane ACTUALLY emits per year (observed, net) — the hard ceiling
+    // for every annual claim made about it.
+    const observedAnnualTonnes = round(totalCo2eTonnes / spanYears, 2);
     const perShipmentSaving = Math.max(0, scenarios.current.co2eTonnes - scenarios.best.co2eTonnes);
-    const reductionPotentialTonnes = round(perShipmentSaving * annualFrequency, 2);
     const reductionPotentialPct = scenarios.best.co2eDeltaPct;
+    const reductionPotentialTonnes = round(
+      Math.min(perShipmentSaving * annualFrequency, observedAnnualTonnes * (reductionPotentialPct / 100)),
+      2,
+    );
     const recommendedApproach = reductionPotentialPct >= 22 ? 'best_co2' : 'balanced';
     // Realistic adoption: not every lane can fully switch to rail/nearest port.
     // A feasibility factor tempers the theoretical max into a credible,
@@ -739,6 +760,7 @@ function buildLanes(shipments) {
       shipmentCount,
       totalWeightTonnes,
       totalCo2eTonnes,
+      observedAnnualTonnes,
       avgCo2ePerTonne,
       avgCo2ePerTonneKm,
       annualFrequency,
@@ -784,14 +806,19 @@ function buildRecommendations(lanes) {
   for (const lane of lanes) {
     const s = lane._scenarios;
     const F = lane.annualFrequency; // per-shipment scenario deltas → annual
+    const currentAnnual = round(s.current.co2eTonnes * F, 2);
+    const annualFreight = Math.max(1, s.current.freightUsd * F);
     const candidates = [];
 
+    // Each candidate's `notional` is an ANNUAL tonnes figure; `cost(alloc)`
+    // returns the annual USD impact for the allocated tonnes (− = saving).
     candidates.push({
       type: 'mode-shift',
       approach: 'best_co2',
       title: `Rail-inland + ocean-heavy on ${lane.origin}→${lane.destPort}`,
-      rationale: `Switching inland road to rail, routing via the nearest gateway and consolidating containers cuts ${round(s.best.co2eDeltaTonnes * F, 1)} t CO₂e/yr (${s.best.co2eDeltaPct}%) on this lane.`,
-      saving: s.best.co2eDeltaTonnes,
+      rationale: (t, pct) => `Switching inland road to rail, routing via the nearest gateway and consolidating containers cuts ~${t} t CO₂e/yr (${pct}% of this lane) — the full Best-for-CO₂ play.`,
+      notional: round(s.best.co2eDeltaTonnes * F, 2),
+      cost: (scale) => Math.round(s.best.costDeltaUsd * F * scale),
       approachScenario: s.best,
     });
     if (lane.reductionPotentialPct < 24) {
@@ -799,8 +826,9 @@ function buildRecommendations(lanes) {
         type: 'route-swap',
         approach: 'balanced',
         title: `Balanced road+ocean optimization for ${lane.customer}`,
-        rationale: `A balanced rail-to-port + optimized delivery plan saves ${round(s.balanced.co2eDeltaTonnes * F, 1)} t CO₂e/yr (${s.balanced.co2eDeltaPct}%) with minimal service impact (${s.balanced.transitBand}).`,
-        saving: s.balanced.co2eDeltaTonnes,
+        rationale: (t, pct) => `A balanced rail-to-port + optimized delivery plan saves ~${t} t CO₂e/yr (${pct}% of this lane) with minimal service impact (${s.balanced.transitBand}).`,
+        notional: round(s.balanced.co2eDeltaTonnes * F, 2),
+        cost: (scale) => Math.round(s.balanced.costDeltaUsd * F * scale),
         approachScenario: s.balanced,
       });
     }
@@ -809,8 +837,9 @@ function buildRecommendations(lanes) {
         type: 'origin-port',
         approach: 'best_co2',
         title: `Re-route ${lane.origin} via ${NEAREST_PORT_BY_ORIGIN[lane.origin]} port`,
-        rationale: `${lane.origin} currently feeds ${lane.originPort}. ${NEAREST_PORT_BY_ORIGIN[lane.origin]} is closer, cutting the inland road leg and its emissions.`,
-        saving: round(s.best.co2eDeltaTonnes * 0.4, 2),
+        rationale: (t) => `${lane.origin} currently feeds ${lane.originPort}. ${NEAREST_PORT_BY_ORIGIN[lane.origin]} is closer — the shorter inland leg avoids ~${t} t CO₂e/yr.`,
+        notional: round(s.best.co2eDeltaTonnes * F * 0.4, 2),
+        cost: (scale) => Math.round(s.best.costDeltaUsd * F * 0.4 * scale),
         approachScenario: s.best,
       });
     }
@@ -819,8 +848,9 @@ function buildRecommendations(lanes) {
         type: 'consolidation',
         approach: 'balanced',
         title: `Consolidate ${lane.shipmentCount} ${lane.customer} shipments`,
-        rationale: `${lane.shipmentCount} shipments run this lane. Consolidating into full containers reduces trips and inland road legs — a low-effort, low-risk reduction.`,
-        saving: round(s.balanced.co2eDeltaTonnes * 0.5, 2),
+        rationale: (t) => `${lane.shipmentCount} shipments run this lane. Consolidating into full containers reduces trips and inland road legs — ~${t} t CO₂e/yr, low-effort and low-risk.`,
+        notional: round(s.balanced.co2eDeltaTonnes * F * 0.5, 2),
+        cost: (scale) => Math.round(s.balanced.costDeltaUsd * F * 0.5 * scale),
         approachScenario: s.balanced,
       });
     }
@@ -830,10 +860,11 @@ function buildRecommendations(lanes) {
         type: 'lsp-swap',
         approach: 'balanced',
         title: `Move ${lane.lsp} volume to ${greener.name}`,
-        rationale: `${lane.lsp} runs ~${Math.round((lane.lspIntensityIndex - 1) * 100)}% above fleet-average CO₂ intensity. ${greener.name} (${greener.carrier}) operates a greener fleet on comparable lanes.`,
-        saving: round((lane.totalCo2eTonnes / 3) * (lane.lspIntensityIndex - greener.intensityIndex) * 0.5, 2),
+        rationale: (t) => `${lane.lsp} runs ~${Math.round((lane.lspIntensityIndex - 1) * 100)}% above fleet-average CO₂ intensity. ${greener.name} (${greener.carrier}) operates a greener fleet — worth ~${t} t CO₂e/yr, at a green-tender premium.`,
+        notional: round((lane.totalCo2eTonnes / 3) * (lane.lspIntensityIndex - greener.intensityIndex) * 0.5, 2),
+        // Greener fleets charge a tender premium — this action COSTS money.
+        cost: () => Math.round(annualFreight * rand(0.02, 0.05)),
         approachScenario: s.balanced,
-        annual: true,
       });
     }
     if (lane.vendorControllability !== 'High' && rng() < 0.4) {
@@ -841,23 +872,41 @@ function buildRecommendations(lanes) {
         type: 'vendor-intervention',
         approach: 'best_co2',
         title: `Align ${lane.vendor} on greener gateway`,
-        rationale: `${lane.vendor} controls the origin handoff and current port choice. A data-backed governance conversation can unlock the rail-inland + nearest-port plan.`,
-        saving: round(s.best.co2eDeltaTonnes * 0.35, 2),
+        rationale: (t) => `${lane.vendor} controls the origin handoff and current port choice. A data-backed governance conversation can unlock ~${t} t CO₂e/yr of the rail-inland + nearest-port plan.`,
+        notional: round(s.best.co2eDeltaTonnes * F * 0.35, 2),
+        // Vendor programs carry engagement cost (QBRs, audits, incentives).
+        cost: () => randInt(1500, 6000),
         approachScenario: s.best,
       });
     }
 
-    const currentAnnual = round(s.current.co2eTonnes * F, 2);
+    // ── Mutually exclusive allocation ────────────────────────────────────
+    // The candidates all pull the same physical levers, so their savings
+    // overlap. Scale them to fit inside the lane's reduction headroom: the
+    // Best-for-CO₂ delta, hard-capped by what the lane OBSERVABLY emits per
+    // year — the sum of a lane's action savings can never exceed either.
+    const headroom = Math.min(
+      round(s.best.co2eDeltaTonnes * F, 2),
+      currentAnnual,
+      round(lane.observedAnnualTonnes * (s.best.co2eDeltaPct / 100), 2),
+    );
+    const notionalSum = candidates.reduce((sum, c) => sum + Math.max(c.notional, 0), 0);
+    const scale = notionalSum > 0 ? Math.min(1, headroom / notionalSum) : 0;
+
     for (const c of candidates) {
-      const annualSaving = round(c.annual ? c.saving : c.saving * F, 2);
-      if (annualSaving <= 0) continue;
+      const annualSaving = round(Math.max(c.notional, 0) * scale, 2);
+      if (annualSaving < 0.05) continue;
       recSeq += 1;
       const meta = ACTION_META[c.type];
-      const confidence = randInt(62, 95);
-      const slaRisk = c.approachScenario.slaRisk;
       const controllability = ['lsp-swap', 'vendor-intervention'].includes(c.type)
         ? 'Influence (partner)'
         : 'Direct (Terova)';
+      // Direct levers are better understood than partner-dependent ones.
+      const confidence = controllability === 'Direct (Terova)' ? randInt(72, 95) : randInt(62, 82);
+      const slaRisk = c.approachScenario.slaRisk;
+      const savingPct = Math.min(round((annualSaving / Math.max(currentAnnual, 0.01)) * 100, 1), c.approachScenario.co2eDeltaPct);
+      const costImpactUsd = c.cost(scale);
+      const macUsdPerTonne = clamp(Math.round(costImpactUsd / Math.max(annualSaving, 0.01)), -5000, 5000);
       recs.push({
         id: `rec-${String(recSeq).padStart(4, '0')}`,
         laneId: lane.laneId,
@@ -873,11 +922,15 @@ function buildRecommendations(lanes) {
         agent: meta.agent,
         approach: c.approach,
         title: c.title,
-        rationale: c.rationale,
+        rationale: c.rationale(annualSaving, savingPct),
         estCo2eSavingTonnes: annualSaving,
-        estCo2eSavingPct: c.approachScenario.co2eDeltaPct,
-        costImpactUsd: c.approachScenario.costDeltaUsd,
-        costImpactLabel: c.approachScenario.costDeltaUsd <= 0 ? 'Cost-neutral / saving' : 'Cost increase',
+        estCo2eSavingPct: savingPct,
+        costImpactUsd,
+        costImpactLabel: costImpactUsd <= 0 ? 'Cost-neutral / saving' : 'Cost increase',
+        macUsdPerTonne,
+        // Before → after transport-mode chains, so the UI can show what changes.
+        fromModePath: s.current.modePath,
+        toModePath: c.approachScenario.modePath,
         transitImpactDays: c.approachScenario.transitDeltaDays,
         slaImpact: slaRisk,
         confidence,
@@ -889,6 +942,7 @@ function buildRecommendations(lanes) {
         evidence: [
           { label: 'Current CO₂e', value: `${currentAnnual} t/yr` },
           { label: 'After action', value: `${round(currentAnnual - annualSaving, 2)} t/yr` },
+          { label: 'Abatement cost', value: costImpactUsd <= 0 ? `saves $${Math.abs(macUsdPerTonne)}/t` : `$${macUsdPerTonne}/t` },
           { label: 'Mode path', value: c.approachScenario.modePath.join(' → ') },
           { label: 'Transit', value: c.approachScenario.transitBand },
         ],
@@ -904,7 +958,9 @@ function buildAirRecs(shipments, laneByShipment) {
   for (const s of shipments.filter((x) => x.airException)) {
     const sc = s._scenarios; // current = air, best = ocean+rail
     const perTrip = Math.max(0, sc.current.co2eTonnes - sc.best.co2eTonnes);
-    const saving = round(perTrip * s.monthlyTrips, 2);
+    // One observed exception ≈ one avoidable recurrence per year — never
+    // multiplied by aspirational trip counts.
+    const saving = round(perTrip, 2);
     if (saving <= 0) continue;
     recSeq += 1;
     const confidence = s.airAvoidable ? randInt(78, 96) : randInt(55, 72);
@@ -929,8 +985,11 @@ function buildAirRecs(shipments, laneByShipment) {
         : `${s.productName} air shipment to ${s.destPort} appears genuinely urgent. Document the justification and govern future occurrences against an air budget.`,
       estCo2eSavingTonnes: saving,
       estCo2eSavingPct: sc.best.co2eDeltaPct,
-      costImpactUsd: sc.best.costDeltaUsd,
+      costImpactUsd: Math.round(sc.best.costDeltaUsd),
       costImpactLabel: 'Cost-neutral / saving',
+      macUsdPerTonne: clamp(Math.round(sc.best.costDeltaUsd / Math.max(saving, 0.01)), -5000, 5000),
+      fromModePath: sc.current.modePath,
+      toModePath: sc.best.modePath,
       transitImpactDays: sc.best.transitDeltaDays,
       slaImpact: 'Higher (longer transit)',
       confidence,
@@ -1053,7 +1112,10 @@ function buildEvidence(shipments) {
   };
   const baseline = yearAgg(BASELINE_YEAR);
   const latest = yearAgg(LATEST_YEAR);
-  const realizedPct = round(((baseline.intensity - latest.intensity) / baseline.intensity) * 100, 1);
+  // Program-attributed reduction: the avoided share in the latest year
+  // (gross vs net), NOT total intensity drift — mix/volume effects are shown
+  // separately in the emissions bridge and never claimed as program results.
+  const realizedPct = round(((latest.grossTonnes - latest.netTonnes) / Math.max(latest.grossTonnes, 0.001)) * 100, 1);
 
   return {
     baselineYear: BASELINE_YEAR,
@@ -1065,15 +1127,16 @@ function buildEvidence(shipments) {
     monthly,
     methodology: {
       formula: 'CO₂e (kg) = Weight (tonnes) × Distance (km) × Emission Factor (kg CO₂e / tonne-km)',
-      distance: 'Straight-line Haversine distance between validated source/destination coordinates, plus a 20% buffer for indirect routes and deviations.',
+      distance: 'Modeled distance: great-circle between validated coordinates × a mode-specific route factor (ocean 1.45 — shipping-route networks incl. canal transits; road 1.30; rail 1.25; air 1.05). Route-network distances (actual sailed/driven) are the planned upgrade path per ISO 14083.',
       allocation: 'For shared/consolidated containers, CO₂e is attributed to each shipment by its weight share.',
-      factors: 'Mode- and distance-tiered emission factors. Air uses the client-provided distance tiers (2.136 / 1.323 / 1.191 kg CO₂e/tonne-km). Ocean, rail and road use global container/rail/full-truck factors. All factors are listed in the methodology table.',
-      scope: 'GHG Protocol Scope 3 — Category 4/9 downstream transportation & distribution.',
+      factors: 'Versioned, well-to-wake (WTW) emission factors per GLEC Framework v3.1 / DEFRA 2025 defaults, mode- and distance-tiered. Factor set FY2026.1 is frozen for the reporting window; the full table with sources is on the Methodology page.',
+      scope: 'GHG Protocol Scope 3 — Category 9 (downstream transportation & distribution). Category 4 vs 9 allocation by freight payer (incoterms) is tracked per lane and under review for CIF/CFR sales.',
     },
     assumptions: [
-      'Distances validated via Bing Maps API and cached in a route dictionary (±5%).',
-      'Emission factors held constant within the reporting window; region-specific factors to be confirmed with the customer.',
+      'Distances are modeled (great-circle × mode route factor), not carrier-reported; route-network distances are the planned upgrade path.',
+      'Emission factor set FY2026.1 (WTW) held constant within the reporting window; carrier primary data to replace modeled defaults as coverage grows.',
       'Realized reductions reflect pilot-lane actions from 2023-07 onward; the 10–20% target is a medium-term ambition, not a month-one guarantee.',
+      'Inventory totals are GROSS actuals; avoided emissions from interventions are tracked separately and never netted into the inventory.',
     ],
   };
 }
@@ -1169,20 +1232,23 @@ function buildExceptions(shipments, lanes) {
 }
 
 // ── Emission-factor reference table (methodology page) ──────────────────────
+// Versioned, cited, well-to-wake (WTW) factor set. The set is frozen per
+// reporting window ("factorSet") so every number is reproducible at audit.
+const FACTOR_SET = { version: 'FY2026.1', basis: 'Well-to-wake (WTW)', validFrom: '2025-07-01', validTo: '2026-06-30' };
 const EMISSION_FACTORS = [
-  { id: 'AIR_SHORT', mode: 'Air', basis: 'Distance < 1000 km', value: 2.136, unit: 'kg CO₂e/tonne-km', source: 'Client screenshot', note: 'Air exception — highest intensity.' },
-  { id: 'AIR_MED', mode: 'Air', basis: 'Distance 1000–3700 km', value: 1.323, unit: 'kg CO₂e/tonne-km', source: 'Client screenshot', note: 'Air exception.' },
-  { id: 'AIR_LONG', mode: 'Air', basis: 'Distance > 3700 km', value: 1.191, unit: 'kg CO₂e/tonne-km', source: 'Client screenshot', note: 'Air exception — long-haul.' },
-  { id: 'OCEAN_SHORT', mode: 'Ocean', basis: 'Distance < 1000 km', value: 0.016, unit: 'kg CO₂e/tonne-km', source: 'Container shipping (global)', note: 'Lowest-carbon long-haul mode.' },
-  { id: 'OCEAN_MED', mode: 'Ocean', basis: 'Distance 1000–3700 km', value: 0.012, unit: 'kg CO₂e/tonne-km', source: 'Container shipping (global)', note: '' },
-  { id: 'OCEAN_LONG', mode: 'Ocean', basis: 'Distance > 3700 km', value: 0.008, unit: 'kg CO₂e/tonne-km', source: 'Container shipping (global)', note: 'Best for long ocean legs.' },
-  { id: 'RAIL', mode: 'Rail', basis: 'All distances', value: 0.028, unit: 'kg CO₂e/tonne-km', source: 'Freight rail (global)', note: 'Preferred inland mode.' },
-  { id: 'ROAD_TRUCK', mode: 'Road', basis: 'Full-load diesel truck', value: 0.088, unit: 'kg CO₂e/tonne-km', source: 'Full-truckload (tonne-km)', note: 'Primary road basis for cross-mode comparison.' },
-  { id: 'ROAD_VAN_KM', mode: 'Road', basis: 'Van (vehicle-km)', value: 0.835, unit: 'kg CO₂e/km', source: 'Client screenshot', note: 'Vehicle-km basis — allocate by weight share.' },
-  { id: 'ROAD_PETROL_KM', mode: 'Road', basis: 'Petrol vehicle (vehicle-km)', value: 1.13, unit: 'kg CO₂e/km', source: 'Client screenshot', note: 'Vehicle-km basis.' },
-  { id: 'ROAD_DIESEL_KM', mode: 'Road', basis: 'Diesel vehicle (vehicle-km)', value: 0.768, unit: 'kg CO₂e/km', source: 'Client screenshot', note: 'Vehicle-km basis.' },
-  { id: 'FUEL_DIESEL', mode: 'Fuel', basis: 'Diesel (fuel-based)', value: 2.68, unit: 'kg CO₂e/litre', source: 'Architect call example', note: 'Alternative fuel-based method.' },
-];
+  { id: 'AIR_SHORT', mode: 'Air', basis: 'Distance < 1000 km', value: 2.136, unit: 'kg CO₂e/tonne-km', source: 'GLEC Framework v3.1 (2025) — air freight default, WTW', note: 'Air exception — highest intensity.' },
+  { id: 'AIR_MED', mode: 'Air', basis: 'Distance 1000–3700 km', value: 1.323, unit: 'kg CO₂e/tonne-km', source: 'GLEC Framework v3.1 (2025) — air freight default, WTW', note: 'Air exception.' },
+  { id: 'AIR_LONG', mode: 'Air', basis: 'Distance > 3700 km', value: 1.191, unit: 'kg CO₂e/tonne-km', source: 'GLEC Framework v3.1 (2025) — air freight default, WTW', note: 'Air exception — long-haul. No RF uplift applied; under review.' },
+  { id: 'OCEAN_SHORT', mode: 'Ocean', basis: 'Distance < 1000 km', value: 0.016, unit: 'kg CO₂e/tonne-km', source: 'GLEC Framework v3.1 (2025) — container vessel default, WTW', note: 'Lowest-carbon long-haul mode.' },
+  { id: 'OCEAN_MED', mode: 'Ocean', basis: 'Distance 1000–3700 km', value: 0.012, unit: 'kg CO₂e/tonne-km', source: 'GLEC Framework v3.1 (2025) — container vessel default, WTW', note: '' },
+  { id: 'OCEAN_LONG', mode: 'Ocean', basis: 'Distance > 3700 km', value: 0.008, unit: 'kg CO₂e/tonne-km', source: 'GLEC Framework v3.1 (2025) — container vessel default, WTW', note: 'Best for long ocean legs.' },
+  { id: 'RAIL', mode: 'Rail', basis: 'All distances', value: 0.028, unit: 'kg CO₂e/tonne-km', source: 'GLEC Framework v3.1 (2025) — diesel freight rail default, WTW', note: 'Preferred inland mode.' },
+  { id: 'ROAD_TRUCK', mode: 'Road', basis: 'Full-load diesel truck', value: 0.088, unit: 'kg CO₂e/tonne-km', source: 'GLEC Framework v3.1 (2025) — articulated truck >20t, WTW', note: 'Primary road basis for cross-mode comparison.' },
+  { id: 'ROAD_VAN_KM', mode: 'Road', basis: 'Van (vehicle-km)', value: 0.835, unit: 'kg CO₂e/km', source: 'DEFRA 2025 GHG conversion factors — van class III, WTW', note: 'Vehicle-km basis — allocate by weight share.' },
+  { id: 'ROAD_PETROL_KM', mode: 'Road', basis: 'Petrol vehicle (vehicle-km)', value: 1.13, unit: 'kg CO₂e/km', source: 'DEFRA 2025 GHG conversion factors, WTW', note: 'Vehicle-km basis.' },
+  { id: 'ROAD_DIESEL_KM', mode: 'Road', basis: 'Diesel vehicle (vehicle-km)', value: 0.768, unit: 'kg CO₂e/km', source: 'DEFRA 2025 GHG conversion factors, WTW', note: 'Vehicle-km basis.' },
+  { id: 'FUEL_DIESEL', mode: 'Fuel', basis: 'Diesel (fuel-based)', value: 2.68, unit: 'kg CO₂e/litre', source: 'DEFRA 2025 — diesel (100% mineral), WTW', note: 'Fuel-based method — preferred where carrier fuel data exists (ISO 14083 primary data).' },
+].map((f) => ({ ...f, version: FACTOR_SET.version, factorBasis: FACTOR_SET.basis, validFrom: FACTOR_SET.validFrom, validTo: FACTOR_SET.validTo }));
 
 // ── Copilot suggestions ─────────────────────────────────────────────────────
 const COPILOT_SUGGESTIONS = [
@@ -1195,184 +1261,6 @@ const COPILOT_SUGGESTIONS = [
   { id: 'cs-7', prompt: 'Which customers should we prioritize?' },
 ];
 
-// ── Enterprise carbon inventory: full Scope 1 + 2 + 3 (GHG Protocol) ─────────
-//
-// The transportation module measures Scope 3 Category 9 (downstream transport)
-// bottom-up from shipments. To make the enterprise Overview reconcile with it,
-// Category 9 is ANCHORED to the real per-year shipment totals; every other
-// scope/category is modelled from that anchor with an agri-food profile (a spice
-// exporter is Scope-3-dominant, purchased goods = farmed raw spices are the
-// single biggest source). Numbers stay illustrative until the client shares the
-// wider inventory — same caveat as the transport factors.
-function buildCarbonInventory(shipments) {
-  const YEARS = [2020, 2021, 2022, 2023, 2024, 2025, 2026];
-  const REPORT_YEAR = 2025; // last complete year
-  const TARGET_YEAR = 2030;
-
-  // Category 9 anchor — actual downstream-transport CO₂e per year (2026 partial → annualised).
-  const transportByYear = {};
-  for (const y of YEARS) {
-    const net = shipments.filter((s) => s.year === y).reduce((a, r) => a + r.co2eTonnes, 0);
-    transportByYear[y] = y === LATEST_YEAR ? net * 2 : net; // annualise partial 2026
-  }
-  const T = round(transportByYear[REPORT_YEAR], 1); // Cat 9 reporting-year value
-
-  // Category catalogue — multiplier is × the Cat-9 transport anchor T.
-  // dataQuality: primary = activity data we hold, secondary = supplier/industry, estimated = spend-based.
-  const CATS = [
-    // Scope 1 — direct
-    { id: 's1-stationary', scope: 'scope1', name: 'Stationary combustion', mult: 0.95, dataQuality: 'primary', method: 'Fuel-based (metered)', note: 'Processing boilers, spice dryers and mills at owned facilities.' },
-    { id: 's1-mobile', scope: 'scope1', name: 'Mobile combustion', mult: 0.40, dataQuality: 'primary', method: 'Fuel-based', note: 'Owned collection fleet and yard vehicles.' },
-    { id: 's1-fugitive', scope: 'scope1', name: 'Fugitive emissions', mult: 0.20, dataQuality: 'secondary', method: 'Refrigerant top-up logs', note: 'Refrigerant leakage from cold storage and chillers.' },
-    { id: 's1-process', scope: 'scope1', name: 'Process emissions', mult: 0.05, dataQuality: 'estimated', method: 'Estimated', note: 'Minor process losses in grinding/sterilisation.' },
-    // Scope 2 — purchased energy
-    { id: 's2-electricity', scope: 'scope2', name: 'Purchased electricity', mult: 0.95, dataQuality: 'primary', method: 'Market-based (supplier factors)', note: 'Grid electricity for processing lines and cold storage.' },
-    { id: 's2-steam', scope: 'scope2', name: 'Purchased steam & heat', mult: 0.15, dataQuality: 'secondary', method: 'Supplier-reported', note: 'District steam for sterilisation.' },
-    // Scope 3 — value chain (GHG Protocol categories 1–15)
-    { id: 's3c1', scope: 'scope3', cat: 1, name: 'Purchased goods & services', mult: 9.0, dataQuality: 'estimated', method: 'Spend + supplier factors', note: 'Farmed raw chilli & spices, packaging, ingredients — the dominant source.' },
-    { id: 's3c2', scope: 'scope3', cat: 2, name: 'Capital goods', mult: 0.40, dataQuality: 'estimated', method: 'Spend-based', note: 'Processing equipment and facility capex.' },
-    { id: 's3c3', scope: 'scope3', cat: 3, name: 'Fuel- & energy-related activities', mult: 0.60, dataQuality: 'secondary', method: 'Well-to-tank factors', note: 'Upstream of Scope 1 & 2 fuels not already counted.' },
-    { id: 's3c4', scope: 'scope3', cat: 4, name: 'Upstream transportation & distribution', mult: 1.30, dataQuality: 'primary', method: 'Activity-based', note: 'Inbound haulage from farms and vendors to plants.' },
-    { id: 's3c5', scope: 'scope3', cat: 5, name: 'Waste generated in operations', mult: 0.50, dataQuality: 'secondary', method: 'Waste factors', note: 'Processing residues and packaging waste.' },
-    { id: 's3c6', scope: 'scope3', cat: 6, name: 'Business travel', mult: 0.30, dataQuality: 'secondary', method: 'Distance / spend', note: 'Air and hotel from travel management data.' },
-    { id: 's3c7', scope: 'scope3', cat: 7, name: 'Employee commuting', mult: 0.35, dataQuality: 'estimated', method: 'Survey + averages', note: 'Commuting and remote-work energy.' },
-    { id: 's3c8', scope: 'scope3', cat: 8, name: 'Upstream leased assets', mult: 0.10, dataQuality: 'estimated', method: 'Estimated', note: 'Leased warehousing not in Scope 1/2.' },
-    { id: 's3c9', scope: 'scope3', cat: 9, name: 'Downstream transportation & distribution', mult: 1.0, dataQuality: 'primary', method: 'Activity-based (shipment-level)', note: 'Outbound to customers — measured in the Transportation module.', trackedHere: true },
-    { id: 's3c10', scope: 'scope3', cat: 10, name: 'Processing of sold products', mult: 0.80, dataQuality: 'estimated', method: 'Estimated', note: 'Blending/packing of spices by downstream manufacturers.' },
-    { id: 's3c11', scope: 'scope3', cat: 11, name: 'Use of sold products', mult: 0.05, dataQuality: 'estimated', method: 'Estimated', note: 'Negligible — spices require no energy in use.' },
-    { id: 's3c12', scope: 'scope3', cat: 12, name: 'End-of-life treatment of sold products', mult: 0.60, dataQuality: 'secondary', method: 'Waste factors', note: 'Disposal of packaging after consumer use.' },
-    { id: 's3c13', scope: 'scope3', cat: 13, name: 'Downstream leased assets', mult: 0.05, dataQuality: 'estimated', method: 'Estimated', note: 'Leased retail/coldchain space.' },
-    { id: 's3c14', scope: 'scope3', cat: 14, name: 'Franchises', mult: 0, dataQuality: 'estimated', method: 'Not applicable', note: 'Not applicable to Terova’s model.', relevant: false },
-    { id: 's3c15', scope: 'scope3', cat: 15, name: 'Investments', mult: 0.15, dataQuality: 'estimated', method: 'Estimated', note: 'Minority stakes in sourcing co-operatives.' },
-  ];
-
-  // Per-scope year factor, normalised to 1.0 at the reporting year; earlier years
-  // are higher (progress since baseline). Scope 2 falls fastest (renewables),
-  // Scope 3 slowest (volume growth offsets intensity gains).
-  const lin = (f2020, y) => f2020 + (1 - f2020) * ((y - BASELINE_YEAR) / (REPORT_YEAR - BASELINE_YEAR));
-  const F = { scope1: (y) => lin(1.15, y), scope2: (y) => lin(1.30, y), scope3: (y) => lin(1.06, y) };
-
-  // Current-year value for a category, and its value in any year.
-  const curOf = (c) => (c.id === 's3c9' ? T : round(c.mult * T, 1));
-  const yearVal = (c, y) => (c.id === 's3c9' ? round(transportByYear[y], 1) : round(curOf(c) * F[c.scope](y), 1));
-
-  const totalCurrent = round(CATS.reduce((a, c) => a + curOf(c), 0), 1);
-
-  // Categories with current-year figures + share + trend.
-  const categories = CATS.map((c) => {
-    const cur = curOf(c);
-    const base = yearVal(c, BASELINE_YEAR);
-    return {
-      id: c.id,
-      scope: c.scope,
-      categoryNumber: c.cat ?? null,
-      name: c.name,
-      co2eTonnes: cur,
-      pct: round((cur / totalCurrent) * 100, 1),
-      deltaPctVsBaseline: base > 0 ? round(((cur - base) / base) * 100, 1) : 0,
-      dataQuality: c.dataQuality,
-      method: c.method,
-      note: c.note,
-      relevant: c.relevant !== false,
-      trackedHere: c.trackedHere === true,
-    };
-  });
-
-  // Per-scope share within scope.
-  const scopeTotal = (sid) => round(categories.filter((c) => c.scope === sid).reduce((a, c) => a + c.co2eTonnes, 0), 1);
-  categories.forEach((c) => {
-    const st = scopeTotal(c.scope);
-    c.scopePct = st > 0 ? round((c.co2eTonnes / st) * 100, 1) : 0;
-  });
-
-  const SCOPE_META = {
-    scope1: { label: 'Scope 1 · Direct', description: 'Emissions from sources Terova owns or controls — combustion, fleet and refrigerants.' },
-    scope2: { label: 'Scope 2 · Energy', description: 'Indirect emissions from purchased electricity, steam and heat.' },
-    scope3: { label: 'Scope 3 · Value chain', description: 'All 15 upstream & downstream categories — the vast majority of the footprint.' },
-  };
-  const byScope = ['scope1', 'scope2', 'scope3'].map((sid) => {
-    const cur = scopeTotal(sid);
-    const base = round(categories.filter((c) => c.scope === sid).reduce((a, c) => a + yearVal(CATS.find((x) => x.id === c.id), BASELINE_YEAR), 0), 1);
-    return {
-      scope: sid,
-      label: SCOPE_META[sid].label,
-      description: SCOPE_META[sid].description,
-      co2eTonnes: cur,
-      pct: round((cur / totalCurrent) * 100, 1),
-      deltaPctVsBaseline: base > 0 ? round(((cur - base) / base) * 100, 1) : 0,
-      categoryCount: categories.filter((c) => c.scope === sid && c.relevant).length,
-    };
-  });
-
-  // Year series (stacked by scope) + SBTi-style target path.
-  const scopeYear = (sid, y) => round(CATS.filter((c) => c.scope === sid).reduce((a, c) => a + yearVal(c, y), 0), 1);
-  const total2020 = round(['scope1', 'scope2', 'scope3'].reduce((a, s) => a + scopeYear(s, BASELINE_YEAR), 0), 1);
-  const s12_2020 = round(scopeYear('scope1', BASELINE_YEAR) + scopeYear('scope2', BASELINE_YEAR), 1);
-  const s3_2020 = scopeYear('scope3', BASELINE_YEAR);
-  const target2030 = round(s12_2020 * 0.58 + s3_2020 * 0.75, 1); // -42% S1+2, -25% S3
-  const targetPath = (y) => round(total2020 + (target2030 - total2020) * ((y - BASELINE_YEAR) / (TARGET_YEAR - BASELINE_YEAR)), 1);
-  const byYear = YEARS.map((y) => {
-    const scope1 = scopeYear('scope1', y);
-    const scope2 = scopeYear('scope2', y);
-    const scope3 = scopeYear('scope3', y);
-    return { year: y, scope1, scope2, scope3, total: round(scope1 + scope2 + scope3, 1), targetTotal: targetPath(y) };
-  });
-
-  const totalBaseline = total2020;
-  const onTrack = totalCurrent <= targetPath(REPORT_YEAR);
-
-  // Scope 2 dual reporting + renewables.
-  const s2market = scopeTotal('scope2');
-  const scope2 = {
-    marketBasedTonnes: s2market,
-    locationBasedTonnes: round(s2market / 0.82, 1),
-    renewablePct: 38,
-  };
-
-  // Data-quality mix, weighted by CO₂e.
-  const dqSum = { primary: 0, secondary: 0, estimated: 0 };
-  categories.forEach((c) => (dqSum[c.dataQuality] += c.co2eTonnes));
-  const dq = (k) => round((dqSum[k] / totalCurrent) * 100, 0);
-
-  // Carbon intensity per revenue (illustrative revenue anchor).
-  const revenueUsdM = 128;
-  const intensity = {
-    perRevenue: round(totalCurrent / revenueUsdM, 1),
-    unit: 't CO₂e / $M revenue',
-    revenueUsdM,
-    deltaPct: round(((totalCurrent / revenueUsdM) / (totalBaseline / (revenueUsdM * 0.82)) - 1) * 100, 1),
-  };
-
-  return {
-    reportingYear: REPORT_YEAR,
-    baselineYear: BASELINE_YEAR,
-    asOf: AS_OF.toISOString().slice(0, 10),
-    company: 'Terova',
-    totalCo2eTonnes: totalCurrent,
-    totalBaselineTonnes: totalBaseline,
-    deltaPctVsBaseline: round(((totalCurrent - totalBaseline) / totalBaseline) * 100, 1),
-    byScope,
-    categories,
-    byYear,
-    scope2,
-    intensity,
-    dataQuality: { primaryPct: dq('primary'), secondaryPct: dq('secondary'), estimatedPct: dq('estimated') },
-    target: {
-      name: 'SBTi 1.5°C-aligned near-term target',
-      baseYear: BASELINE_YEAR,
-      targetYear: TARGET_YEAR,
-      scope12ReductionPct: 42,
-      scope3ReductionPct: 25,
-      targetTotalTonnes: target2030,
-      onTrack,
-      milestoneTonnes: targetPath(REPORT_YEAR),
-      gapTonnes: round(totalCurrent - targetPath(REPORT_YEAR), 0),
-      status: onTrack
-        ? 'On track against the linear reduction path.'
-        : `Behind the path — ${round(totalCurrent - targetPath(REPORT_YEAR), 0)} t CO₂e above the ${REPORT_YEAR} milestone, driven by Scope 3.`,
-    },
-  };
-}
 
 // ── Write everything ─────────────────────────────────────────────────────────
 function writeJson(relPath, data) {
@@ -1486,7 +1374,6 @@ function main() {
   writeJson('hotspots.json', buildHotspots(shipments));
   writeJson('partners.json', buildPartners(shipments, recs));
   writeJson('evidence.json', buildEvidence(shipments));
-  writeJson('carbon-inventory.json', buildCarbonInventory(shipments));
   writeJson('pulse.json', buildPulse(lanes, recs, allShipments));
   writeJson('exceptions.json', buildExceptions(shipments, lanes));
   writeJson('emission-factors.json', EMISSION_FACTORS);

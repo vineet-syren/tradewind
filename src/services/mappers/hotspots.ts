@@ -1,5 +1,5 @@
 /** Recompute emission hotspots from a scoped shipment set (so filters apply). */
-import type { CustomerModeRow, Hotspots, HotspotRow, Lane, MonthModeRow, Shipment, ShipmentFilters } from '@/types';
+import type { CustomerModeRow, FlowRow, Hotspots, HotspotRow, Lane, MonthModeRow, RegionModeRow, Shipment, ShipmentFilters } from '@/types';
 
 const round = (n: number, dp = 2) => {
   const f = 10 ** dp;
@@ -48,6 +48,42 @@ function customerModeMatrix(shipments: Shipment[], limit = 8): CustomerModeRow[]
   return [...m.values()].sort((a, b) => b.total - a.total).slice(0, limit);
 }
 
+/** Destination regions broken down by transport mode (CO₂e) — mekko/heatmap input. */
+function regionModeMatrix(shipments: Shipment[]): RegionModeRow[] {
+  const m = new Map<string, RegionModeRow>();
+  for (const s of shipments) {
+    const r = m.get(s.region) ?? { region: s.region, Ocean: 0, Rail: 0, Road: 0, Air: 0, total: 0 };
+    r[s.primaryMode] = round(r[s.primaryMode] + s.co2eTonnes, 2);
+    r.total = round(r.total + s.co2eTonnes, 2);
+    m.set(s.region, r);
+  }
+  return [...m.values()].sort((a, b) => b.total - a.total);
+}
+
+/** Two-stage CO₂e flow links (origin → mode, mode → destination region) for sankey views. */
+function emissionFlows(shipments: Shipment[], originLimit = 6): FlowRow[] {
+  const originTotals = new Map<string, number>();
+  for (const s of shipments) originTotals.set(s.origin, (originTotals.get(s.origin) ?? 0) + s.co2eTonnes);
+  const keptOrigins = new Set(
+    [...originTotals.entries()].sort((a, b) => b[1] - a[1]).slice(0, originLimit).map(([k]) => k),
+  );
+  const stage1 = new Map<string, number>();
+  const stage2 = new Map<string, number>();
+  for (const s of shipments) {
+    const origin = keptOrigins.has(s.origin) ? s.origin : 'Other origins';
+    const k1 = `${origin}→${s.primaryMode}`;
+    const k2 = `${s.primaryMode}→${s.region}`;
+    stage1.set(k1, (stage1.get(k1) ?? 0) + s.co2eTonnes);
+    stage2.set(k2, (stage2.get(k2) ?? 0) + s.co2eTonnes);
+  }
+  const toRows = (m: Map<string, number>): FlowRow[] =>
+    [...m.entries()].map(([k, v]) => {
+      const [from, to] = k.split('→');
+      return { from, to, value: round(v, 2) };
+    });
+  return [...toRows(stage1), ...toRows(stage2)].filter((f) => f.value > 0).sort((a, b) => b.value - a.value);
+}
+
 /** Monthly CO₂e split by mode (for a stacked-area trend). */
 function monthlyByMode(shipments: Shipment[]): MonthModeRow[] {
   const m = new Map<string, MonthModeRow>();
@@ -72,6 +108,8 @@ export function buildHotspots(shipments: Shipment[]): Hotspots {
     byOrigin: topGroups(shipments, (s) => s.origin, (s) => `${s.origin}, ${s.originState}`),
     customerModeMatrix: customerModeMatrix(shipments),
     monthlyByMode: monthlyByMode(shipments),
+    regionModeMatrix: regionModeMatrix(shipments),
+    flows: emissionFlows(shipments),
   };
 }
 

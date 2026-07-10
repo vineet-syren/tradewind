@@ -28,18 +28,19 @@ export function ValueHero({ totalTonnes, parts, recCount }: { totalTonnes: numbe
           Avoidable across the network
         </Typography>
         <Typography sx={{ mt: 1.25, fontWeight: 800, lineHeight: 1.25, fontSize: { xs: '1.5rem', md: '2rem' }, textWrap: 'balance' }}>
-          You&rsquo;re leaving <A>{formatTonnes(totalTonnes)} CO₂e/yr</A> in savings on the table
-          {parts.length > 0 && <> — </>}
+          You&rsquo;re leaving <A>{formatTonnes(totalTonnes)} CO₂e/yr</A> in realizable savings on the table
+          {parts.length > 0 && <> — estimated split: </>}
           {parts.map((p, i) => (
             <Box component="span" key={p.label}>
-              <A>{formatTonnes(p.tonnes)}</A> in {p.label}
+              <A>≈{formatTonnes(p.tonnes)}</A> in {p.label}
               {i < parts.length - 2 ? ', ' : i === parts.length - 2 ? ', and ' : ''}
             </Box>
           ))}
           .
         </Typography>
         <Typography sx={{ mt: 1.5, color: 'rgba(255,255,255,0.72)', fontSize: '.95rem' }}>
-          Realizable this year — <b style={{ color: '#fff' }}>{recCount}</b> ranked actions are ready to capture it in <b style={{ color: '#fff' }}>Reduce &amp; plan</b>.
+          Feasibility-tempered, capped at what each lane actually emits — <b style={{ color: '#fff' }}>{recCount}</b> ranked suggestions explain how, route by
+          route (open any lane&apos;s <b style={{ color: '#fff' }}>Lane 360</b>). Split by suggestion type is an allocation estimate, not measured per type.
         </Typography>
       </CardContent>
     </Card>

@@ -27,6 +27,23 @@ export interface MonthModeRow {
   Air: number;
 }
 
+/** CO₂e by destination region, split by transport mode (mekko/heatmap input). */
+export interface RegionModeRow {
+  region: string;
+  Ocean: number;
+  Rail: number;
+  Road: number;
+  Air: number;
+  total: number;
+}
+
+/** A directed CO₂e flow between two stages (origin → mode, mode → region) for sankey views. */
+export interface FlowRow {
+  from: string;
+  to: string;
+  value: number;
+}
+
 export interface Hotspots {
   byProductCategory: HotspotRow[];
   byCustomer: HotspotRow[];
@@ -39,6 +56,8 @@ export interface Hotspots {
   byOrigin: HotspotRow[];
   customerModeMatrix: CustomerModeRow[];
   monthlyByMode: MonthModeRow[];
+  regionModeMatrix: RegionModeRow[];
+  flows: FlowRow[];
 }
 
 /** Dimension keys that map to a `HotspotRow[]` ranking (for the self-service view). */

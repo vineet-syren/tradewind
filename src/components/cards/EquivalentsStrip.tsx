@@ -38,6 +38,9 @@ export function EquivalentsStrip({ tonnes, title = 'In tangible terms' }: { tonn
             </Stack>
           ))}
         </Box>
+        <Typography variant="caption" sx={{ display: 'block', mt: 1.5, color: 'text.disabled' }}>
+          Illustrative US EPA-style equivalence factors — for communication, not carbon accounting.
+        </Typography>
       </CardContent>
     </Card>
   );

@@ -8,9 +8,9 @@ export interface IntensityRow {
 }
 
 // Efficiency tiers (worst → best) keyed off the row's position in the range.
-const RED = '#C0392B';
-const AMBER = '#C8841B';
-const GREEN = '#2E8B6F';
+const RED = '#ef4444';
+const AMBER = '#f59e0b';
+const GREEN = '#10b981';
 
 /**
  * Ranked horizontal bars for transport intensity (g CO₂e/t·km), least efficient

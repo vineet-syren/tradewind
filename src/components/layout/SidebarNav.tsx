@@ -1,23 +1,36 @@
+import { useMemo } from 'react';
 import { Box, List, ListItemButton, ListItemIcon, ListItemText, Typography } from '@mui/material';
+import { alpha, useTheme } from '@mui/material/styles';
 import { NavLink } from 'react-router-dom';
-import { NAV_GROUPS } from '@/constants/nav';
+import { navGroupsForPersona } from '@/constants/nav';
 import { NavIcon } from './iconRegistry';
 import { brandTokens } from '@/app/config/theme';
+import { useAppSelector } from '@/app/store/hooks';
 
 export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
+  const theme = useTheme();
+  const persona = useAppSelector((s) => s.persona.current);
+  // Role-based menu: each persona sees only the pages their job needs.
+  const groups = useMemo(() => navGroupsForPersona(persona), [persona]);
+  const isDark = theme.palette.mode === 'dark';
+  const mutedColor = isDark ? theme.palette.text.secondary : brandTokens.sidebarMuted;
+  const textColor = isDark ? theme.palette.text.primary : brandTokens.sidebarText;
+  const activeBg = isDark ? alpha(theme.palette.primary.main, 0.16) : brandTokens.sidebarActive;
+  const activeText = isDark ? theme.palette.primary.light : brandTokens.sidebarActiveText;
+
   return (
     <Box sx={{ px: 1.5 }}>
-      {NAV_GROUPS.map((group) => (
+      {groups.map((group) => (
         <Box key={group.heading || group.items[0]?.to} sx={{ mb: 1.5 }}>
           {group.heading && (
             <Typography
               sx={{
                 px: 1.5,
                 py: 1,
-                fontSize: 10,
+                fontSize: 11,
                 letterSpacing: '0.14em',
                 fontWeight: 700,
-                color: brandTokens.sidebarMuted,
+                color: mutedColor,
               }}
             >
               {group.heading}
@@ -34,17 +47,17 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
                 sx={{
                   borderRadius: 2,
                   mb: 0.25,
-                  color: brandTokens.sidebarText,
+                  color: textColor,
                   fontWeight: 500,
-                  '& .MuiListItemIcon-root': { color: brandTokens.sidebarMuted, minWidth: 34 },
+                  '& .MuiListItemIcon-root': { color: mutedColor, minWidth: 34 },
                   '&.active': {
-                    bgcolor: brandTokens.sidebarActive,
-                    color: brandTokens.sidebarActiveText,
+                    bgcolor: activeBg,
+                    color: activeText,
                     fontWeight: 700,
                     '& .MuiListItemText-primary': { fontWeight: 700 },
-                    '& .MuiListItemIcon-root': { color: brandTokens.sidebarActiveText },
+                    '& .MuiListItemIcon-root': { color: activeText },
                   },
-                  '&:hover': { bgcolor: 'rgba(27,31,50,0.045)' },
+                  '&:hover': { bgcolor: isDark ? 'rgba(241,245,249,0.06)' : 'rgba(17,24,39,0.045)' },
                 }}
               >
                 <ListItemIcon>
@@ -52,7 +65,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
                 </ListItemIcon>
                 <ListItemText
                   primary={item.label}
-                  primaryTypographyProps={{ fontSize: 13.5, fontWeight: 500, whiteSpace: 'normal', lineHeight: 1.2 }}
+                  primaryTypographyProps={{ fontSize: 14.5, fontWeight: 500, whiteSpace: 'normal', lineHeight: 1.2 }}
                 />
               </ListItemButton>
             ))}

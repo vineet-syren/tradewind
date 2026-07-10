@@ -10,7 +10,7 @@ import { useDataSource } from '@/hooks/useDataSource';
 import { useAsync } from '@/hooks/useAsync';
 import { useAppSelector } from '@/app/store/hooks';
 import type { Shipment } from '@/types';
-import { APP_TODAY, addDaysISO } from '@/constants/app';
+import { APP_TODAY, STATUS_LABEL, addDaysISO } from '@/constants/app';
 import { formatTonnes, formatDistance, formatCurrency, formatNumber, formatWeightTonnes, formatIntensity, formatDate } from '@/utils/format';
 
 const STATUS_COLOR: Record<string, 'success' | 'warning' | 'info' | 'default'> = {
@@ -23,7 +23,7 @@ const STATUSES = ['All', 'Delivered', 'In transit', 'Planned'] as const;
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <Box>
-      <Typography variant="caption" sx={{ color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.07em', fontSize: 10, display: 'block' }}>{label}</Typography>
+      <Typography variant="caption" sx={{ color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.07em', fontSize: 11, display: 'block' }}>{label}</Typography>
       <Typography variant="subtitle1" sx={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{value}</Typography>
     </Box>
   );
@@ -67,12 +67,36 @@ export function ShipmentLedgerSection({ onRowSelect, selectedId, compact = false
     : 'All shipments · past + planned';
 
   const allColumns: Column<Shipment>[] = [
+    {
+      key: 'id',
+      header: 'Shipment ID',
+      render: (s) => (
+        <Typography variant="body2" sx={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12, fontWeight: 600, color: 'text.secondary', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+          {s.shipmentId}
+        </Typography>
+      ),
+      sortValue: (s) => s.shipmentId,
+    },
     { key: 'date', header: 'Ship date', render: (s) => <Typography variant="body2" sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatDate(s.date)}</Typography>, sortValue: (s) => s.date },
     { key: 'eta', header: 'ETA', render: (s) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDate(s.eta)}</span>, sortValue: (s) => s.eta },
-    { key: 'status', header: 'Status', render: (s) => <Chip size="small" color={STATUS_COLOR[s.status] ?? 'default'} label={s.status} />, sortValue: (s) => s.status },
+    { key: 'status', header: 'Status', render: (s) => <Chip size="small" color={STATUS_COLOR[s.status] ?? 'default'} label={STATUS_LABEL[s.status] ?? s.status} />, sortValue: (s) => s.status },
+    {
+      key: 'deadline',
+      header: 'Deadline',
+      render: (s) =>
+        s.status === 'Planned' ? (
+          <Typography variant="body2" sx={{ fontWeight: 600, color: 'warning.main', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+            {formatDate(addDaysISO(s.date, -3))}
+          </Typography>
+        ) : (
+          <Typography variant="body2" color="text.disabled">—</Typography>
+        ),
+      sortValue: (s) => (s.status === 'Planned' ? s.date : ''),
+    },
     { key: 'lane', header: 'Lane', render: (s) => <Typography variant="body2" sx={{ fontWeight: 600 }}>{s.origin} → {s.destPort}</Typography>, sortValue: (s) => s.origin },
     { key: 'product', header: 'Product', render: (s) => s.productName, sortValue: (s) => s.productName },
     { key: 'customer', header: 'Customer', render: (s) => s.customer, sortValue: (s) => s.customer },
+    { key: 'vendor', header: 'Vendor', render: (s) => s.vendor, sortValue: (s) => s.vendor },
     { key: 'mode', header: 'Mode', render: (s) => <Stack direction="row" spacing={0.5} alignItems="center"><ModeIcon mode={s.primaryMode} fontSize="small" />{s.primaryMode}</Stack>, sortValue: (s) => s.primaryMode },
     { key: 'weight', header: 'Weight', align: 'right', render: (s) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatWeightTonnes(s.weightTonnes)}</span>, sortValue: (s) => s.weightTonnes },
     { key: 'distance', header: 'Distance', align: 'right', render: (s) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDistance(s.totalDistanceKm)}</span>, sortValue: (s) => s.totalDistanceKm },
@@ -83,7 +107,7 @@ export function ShipmentLedgerSection({ onRowSelect, selectedId, compact = false
   ];
   // Compact view (for the split layout) keeps only the essentials — full detail
   // opens in the panel alongside.
-  const compactKeys = ['date', 'status', 'lane', 'product', 'customer', 'co2e'];
+  const compactKeys = ['id', 'date', 'status', 'deadline', 'lane', 'product', 'customer', 'vendor', 'co2e'];
   const columns = compact ? allColumns.filter((c) => compactKeys.includes(c.key)) : allColumns;
   const handleRow = (s: Shipment) => { if (onRowSelect) onRowSelect(s); else setSelected(s.shipmentId); };
 
@@ -93,7 +117,7 @@ export function ShipmentLedgerSection({ onRowSelect, selectedId, compact = false
         <CardContent sx={{ py: 2 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap gap={2}>
             <Box>
-              <Typography variant="caption" sx={{ color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: 10 }}>Statement period</Typography>
+              <Typography variant="caption" sx={{ color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: 11 }}>Statement period</Typography>
               <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>{period}</Typography>
             </Box>
             <Stack direction="row" spacing={4} useFlexGap flexWrap="wrap">
@@ -104,7 +128,7 @@ export function ShipmentLedgerSection({ onRowSelect, selectedId, compact = false
             </Stack>
             <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
               {(['Delivered', 'In transit', 'Planned'] as const).map((st) =>
-                totals.byStatus[st] ? <Chip key={st} size="small" variant="outlined" color={STATUS_COLOR[st]} label={`${st} ${totals.byStatus[st]}`} /> : null,
+                totals.byStatus[st] ? <Chip key={st} size="small" variant="outlined" color={STATUS_COLOR[st]} label={`${STATUS_LABEL[st] ?? st} ${totals.byStatus[st]}`} /> : null,
               )}
             </Stack>
           </Stack>
@@ -117,7 +141,7 @@ export function ShipmentLedgerSection({ onRowSelect, selectedId, compact = false
         icon={<ReceiptLongRounded sx={{ fontSize: 18 }} />}
         action={
           <TextField select size="small" label="Status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as (typeof STATUSES)[number])} sx={{ width: 150 }}>
-            {STATUSES.map((st) => <MenuItem key={st} value={st}>{st}</MenuItem>)}
+            {STATUSES.map((st) => <MenuItem key={st} value={st}>{st === 'All' ? 'All' : STATUS_LABEL[st] ?? st}</MenuItem>)}
           </TextField>
         }
       >
@@ -135,7 +159,8 @@ export function ShipmentLedgerSection({ onRowSelect, selectedId, compact = false
             onRowClick={handleRow}
             selectedRowKey={selectedId ?? selected}
             initialSortKey="date"
-            maxHeight={620}
+            maxHeightCss={compact ? 'calc(100vh - 210px)' : undefined}
+            maxHeight={compact ? undefined : 620}
           />
         )}
       </ChartContainer>

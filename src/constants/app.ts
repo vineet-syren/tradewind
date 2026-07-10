@@ -21,30 +21,17 @@ export const APP_META = {
 
 /** Modes and their brand colours (used by charts, the map, and chips). */
 export const MODE_COLORS: Record<string, string> = {
-  Ocean: '#1E6E8C',
-  Rail: '#7A5AA0',
-  Road: '#C8841B',
-  Air: '#C0392B',
-};
-
-/** GHG Protocol scope colours — distinct hues that still sit within the indigo chrome. */
-export const SCOPE_COLORS: Record<string, string> = {
-  scope1: '#E7A93B', // direct combustion / fleet — amber
-  scope2: '#2FB8A6', // purchased energy — teal
-  scope3: '#5B57E0', // value chain — indigo (dominant)
-};
-
-export const SCOPE_SHORT: Record<string, string> = {
-  scope1: 'Scope 1',
-  scope2: 'Scope 2',
-  scope3: 'Scope 3',
+  Ocean: '#3b82f6',
+  Rail: '#8b5cf6',
+  Road: '#f59e0b',
+  Air: '#f43f5e',
 };
 
 export const APPROACH_COLORS: Record<string, string> = {
-  current: '#6B7384',
-  optimal: '#C0392B',
-  balanced: '#C8841B',
-  best_co2: '#0C8B7B',
+  current: '#64748b',
+  optimal: '#f43f5e',
+  balanced: '#f59e0b',
+  best_co2: '#10b981',
 };
 
 export const APPROACH_LABEL: Record<string, string> = {
@@ -52,4 +39,11 @@ export const APPROACH_LABEL: Record<string, string> = {
   optimal: 'Fastest',
   balanced: 'Balanced',
   best_co2: 'Best for CO₂',
+};
+
+/** Display labels for shipment status — data keeps 'Planned'; the UI says "To be planned". */
+export const STATUS_LABEL: Record<string, string> = {
+  Delivered: 'Delivered',
+  'In transit': 'In transit',
+  Planned: 'To be planned',
 };

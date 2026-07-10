@@ -3,16 +3,16 @@ import { MODE_COLORS, APPROACH_COLORS } from '@/constants/app';
 
 /** Ordered categorical palette for charts. */
 export const CHART_PALETTE = [
-  brandTokens.teal,
-  '#1E6E8C',
-  '#7A5AA0',
-  brandTokens.med,
-  '#3F8F7A',
-  '#C0392B',
-  '#4C7FB0',
-  '#9C6B3E',
-  '#2E8B6F',
-  '#8E7CC3',
+  '#6366f1', // indigo
+  '#3b82f6', // blue
+  '#10b981', // emerald
+  '#f59e0b', // amber
+  '#f43f5e', // rose
+  '#8b5cf6', // violet
+  '#14b8a6', // teal
+  '#f97316', // orange
+  '#64748b', // slate
+  '#a78bfa', // lavender
 ];
 
 export const SEVERITY_COLORS = {

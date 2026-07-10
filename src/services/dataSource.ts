@@ -9,7 +9,6 @@
 import type {
   AgentCatalogEntry,
   Assumptions,
-  CarbonInventory,
   CopilotResult,
   CopilotSuggestion,
   EmissionFactorRow,
@@ -60,8 +59,6 @@ export interface CarbonDataSource {
 
   // Aggregates
   getFootprint(params?: ScopeParams): Promise<Footprint>;
-  /** Enterprise-wide GHG Protocol inventory (Scope 1 + 2 + 3). Org-level, unscoped. */
-  getCarbonInventory(): Promise<CarbonInventory>;
   getHotspots(params?: ScopeParams): Promise<Hotspots>;
   getPartners(params?: ScopeParams): Promise<Partners>;
   getEvidence(): Promise<EsgEvidence>;

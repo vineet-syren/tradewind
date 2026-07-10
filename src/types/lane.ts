@@ -56,6 +56,8 @@ export interface Lane {
   shipmentCount: number;
   totalWeightTonnes: number;
   totalCo2eTonnes: number;
+  /** Observed annual emissions (total ÷ years active) — ceiling for annual claims. */
+  observedAnnualTonnes: number;
   avgCo2ePerTonne: number;
   /** True transport intensity — g CO₂e per tonne-kilometre. */
   avgCo2ePerTonneKm: number;

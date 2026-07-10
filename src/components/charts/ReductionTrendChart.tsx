@@ -1,5 +1,6 @@
 import {
   Area,
+  Brush,
   CartesianGrid,
   ComposedChart,
   Line,
@@ -25,8 +26,9 @@ export function ReductionTrendChart({ data, height = 280 }: { data: MonthlyPoint
           </linearGradient>
         </defs>
         <CartesianGrid strokeDasharray="3 3" stroke={theme.palette.divider} vertical={false} />
-        <XAxis dataKey="periodLabel" tick={{ fontSize: 11 }} interval={2} stroke={theme.palette.text.secondary} />
-        <YAxis tick={{ fontSize: 11 }} stroke={theme.palette.text.secondary} width={44} />
+        {/* Auto-thinned ticks so month labels never overlap; the brush below zooms. */}
+        <XAxis dataKey="periodLabel" tick={{ fontSize: 12 }} interval="preserveStartEnd" minTickGap={48} stroke={theme.palette.text.secondary} />
+        <YAxis tick={{ fontSize: 12 }} stroke={theme.palette.text.secondary} width={44} />
         <Tooltip
           formatter={(v: number, n) => [formatTonnes(v), n === 'netTonnes' ? 'Net CO₂e' : n === 'grossTonnes' ? 'Gross (pre-action)' : 'Avoided']}
           labelFormatter={(l) => `Month: ${l}`}
@@ -34,6 +36,9 @@ export function ReductionTrendChart({ data, height = 280 }: { data: MonthlyPoint
         />
         <Line type="monotone" dataKey="grossTonnes" stroke={theme.palette.text.secondary} strokeDasharray="5 4" dot={false} strokeWidth={1.5} />
         <Area type="monotone" dataKey="netTonnes" stroke={theme.palette.primary.main} strokeWidth={2.5} fill="url(#twNet)" />
+        {rows.length > 12 && (
+          <Brush dataKey="periodLabel" height={22} travellerWidth={9} stroke={theme.palette.primary.main} fill={theme.palette.mode === 'dark' ? '#1e293b' : '#f3f4f6'} />
+        )}
       </ComposedChart>
     </ResponsiveContainer>
   );

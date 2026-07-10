@@ -1,4 +1,4 @@
-import type { ApproachKind, Complexity, Controllability } from './common';
+import type { ApproachKind, Complexity, Controllability, ModeLabel } from './common';
 import type { PersonaId } from './persona';
 
 export type ActionType =
@@ -41,6 +41,11 @@ export interface Recommendation {
   estCo2eSavingPct: number;
   costImpactUsd: number;
   costImpactLabel: string;
+  /** Marginal abatement cost, USD per tonne CO₂e avoided (negative = saves money). */
+  macUsdPerTonne?: number;
+  /** Transport-mode chain today vs after the change — for a plain "Now → Change to" view. */
+  fromModePath?: ModeLabel[];
+  toModePath?: ModeLabel[];
   transitImpactDays: number;
   slaImpact: string;
   confidence: number;

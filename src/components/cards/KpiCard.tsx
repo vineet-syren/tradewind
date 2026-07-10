@@ -18,7 +18,6 @@ import LocalShippingRounded from '@mui/icons-material/LocalShippingRounded';
 import FactoryRounded from '@mui/icons-material/FactoryRounded';
 import RouteRounded from '@mui/icons-material/RouteRounded';
 import StraightenRounded from '@mui/icons-material/StraightenRounded';
-import LocalGasStationRounded from '@mui/icons-material/LocalGasStationRounded';
 import type { Intent, KpiMetric } from '@/types';
 import { formatMetric } from '@/utils/format';
 
@@ -38,7 +37,6 @@ const ICONS: Record<string, SvgIconComponent> = {
   vendor: FactoryRounded,
   lanes: RouteRounded,
   distance: StraightenRounded,
-  fuel: LocalGasStationRounded,
 };
 
 /** Resolve an intent to a {main, soft} colour pair from the theme. */

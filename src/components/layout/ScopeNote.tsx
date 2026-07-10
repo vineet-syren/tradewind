@@ -4,8 +4,12 @@ import FilterAltRoundedIcon from '@mui/icons-material/FilterAltRounded';
 import { useAppSelector } from '@/app/store/hooks';
 import { getPersona } from '@/constants/personas';
 
-/** Small badge showing the active persona lens + any active filters. */
-export function ScopeNote() {
+/**
+ * Small badge showing the active persona lens + any active filters.
+ * Pass `showFilters={false}` on pages without a filter bar (e.g. the Copilot
+ * landing) — a filter count the user can't see or change is just confusing.
+ */
+export function ScopeNote({ showFilters = true }: { showFilters?: boolean }) {
   const persona = useAppSelector((s) => s.persona.current);
   const filters = useAppSelector((s) => s.filters.value);
   const activeFilterCount = Object.values(filters).filter(
@@ -17,7 +21,7 @@ export function ScopeNote() {
       <Tooltip title={p.lens}>
         <Chip icon={<VisibilityRoundedIcon />} label={`Viewing as ${p.name}`} variant="outlined" size="small" />
       </Tooltip>
-      {activeFilterCount > 0 && (
+      {showFilters && activeFilterCount > 0 && (
         <Chip
           icon={<FilterAltRoundedIcon />}
           label={`${activeFilterCount} filter${activeFilterCount > 1 ? 's' : ''}`}

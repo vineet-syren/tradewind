@@ -27,7 +27,7 @@ export function MultiSelectFilter<T extends string | number>({
       onChange={(_, v) => onChange(v as T[])}
       getOptionLabel={(o) => (format ? format(o) : String(o))}
       limitTags={1}
-      sx={{ width, minWidth: 160 }}
+      sx={{ width, minWidth: Math.min(width, 160), flexShrink: 0 }}
       renderOption={(props, option, { selected }) => {
         const { key, ...rest } = props as { key: string } & React.HTMLAttributes<HTMLLIElement>;
         return (

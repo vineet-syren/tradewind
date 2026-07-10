@@ -38,7 +38,7 @@ function badgeIcon(mode: string, big = false, count = 1) {
 }
 
 function pinIcon(kind: 'origin' | 'port' | 'dest') {
-  const color = kind === 'origin' ? '#2E8B6F' : kind === 'dest' ? '#C0392B' : '#0C8B7B';
+  const color = kind === 'origin' ? '#10b981' : kind === 'dest' ? '#ef4444' : '#10b981';
   return L.divIcon({
     className: 'tw-pin',
     html: `<svg width="26" height="35" viewBox="0 0 30 40" xmlns="http://www.w3.org/2000/svg">
@@ -69,6 +69,9 @@ function FitBounds({ points }: { points: LatLng[] }) {
   return null;
 }
 
+type ScenarioKindKey = 'current' | 'best' | 'balanced' | 'optimal';
+const ALL_KINDS: ScenarioKindKey[] = ['current', 'best', 'balanced', 'optimal'];
+
 export function WorldMap({
   lanes,
   selectedLaneId,
@@ -76,6 +79,8 @@ export function WorldMap({
   onClear,
   height = 460,
   scenarioKind = 'current',
+  showAllRoutes = false,
+  onSelectKind,
 }: {
   lanes: Lane[];
   selectedLaneId?: string | null;
@@ -83,7 +88,11 @@ export function WorldMap({
   onClear?: () => void;
   height?: number;
   /** Which route option to trace for the isolated lane (drives live redraw). */
-  scenarioKind?: 'current' | 'best' | 'balanced' | 'optimal';
+  scenarioKind?: ScenarioKindKey;
+  /** Draw all four route options at once (to-be-planned shipments) so they can be compared on the map. */
+  showAllRoutes?: boolean;
+  /** Clicking a route (or a compare row) highlights that option. */
+  onSelectKind?: (k: ScenarioKindKey) => void;
 }) {
   const theme = useTheme();
   const dark = theme.palette.mode === 'dark';
@@ -124,6 +133,24 @@ export function WorldMap({
       })),
     [legs],
   );
+
+  // Compare view: every route option traced at once, colored by approach.
+  const allRoutes = useMemo(() => {
+    if (!isolated || !showAllRoutes || !detail) return [];
+    return ALL_KINDS.map((kind) => {
+      const sc = detail.scenarios[kind];
+      const paths = sc.legs.map((leg) =>
+        leg.mode === 'ocean' ? oceanRoute(leg.to, leg.fromCoord, leg.toCoord) : landCurve(leg.fromCoord, leg.toCoord, leg.mode === 'air' ? 0.28 : 0.06),
+      );
+      return {
+        kind,
+        scenario: sc,
+        paths,
+        distanceKm: sc.legs.reduce((s, l) => s + l.distanceKm, 0),
+        fuelLitres: sc.legs.reduce((s, l) => s + l.fuelLitres, 0),
+      };
+    });
+  }, [isolated, showAllRoutes, detail]);
   const waypoints = useMemo(() => {
     if (!legs.length) return [] as { name: string; pt: LatLng; kind: 'origin' | 'port' | 'dest' }[];
     const wp: { name: string; pt: LatLng; kind: 'origin' | 'port' | 'dest' }[] = [
@@ -133,7 +160,24 @@ export function WorldMap({
     return wp;
   }, [legs]);
 
-  const fitPoints = isolated ? isoLegs.flatMap((l) => l.path) : group.points;
+  // Plain-language description of how an option's route differs from current:
+  // a different origin port and/or a different mode chain.
+  const routeChange = (r: { kind: ScenarioKindKey; scenario: { legs: Leg[]; modePath: string[] } }): string | null => {
+    if (!detail || r.kind === 'current') return null;
+    const cur = detail.scenarios.current;
+    const parts: string[] = [];
+    const curPort = cur.legs[0]?.to;
+    const newPort = r.scenario.legs[0]?.to;
+    if (curPort && newPort && curPort !== newPort) parts.push(`via ${newPort} instead of ${curPort}`);
+    if (r.scenario.modePath.join('|') !== cur.modePath.join('|')) parts.push(r.scenario.modePath.join(' → '));
+    return parts.length ? `Route change: ${parts.join(' · ')}` : null;
+  };
+
+  const fitPoints = isolated
+    ? showAllRoutes && allRoutes.length
+      ? allRoutes.flatMap((r) => r.paths.flat())
+      : isoLegs.flatMap((l) => l.path)
+    : group.points;
   const totals = isolated
     ? {
         co2e: legs.reduce((s, l) => s + l.co2eTonnes, 0),
@@ -214,14 +258,48 @@ export function WorldMap({
               ),
             )}
 
-          {/* ── ISOLATED VIEW — one shipment, end to end ───────────────── */}
-          {isolated && isoLegs.map(({ i, path }) => <Polyline key={`sh-${i}`} positions={path} pathOptions={{ color: '#0B1F2A', weight: 8, opacity: 0.16, lineCap: 'round' }} />)}
+          {/* ── COMPARE VIEW — all four route options traced at once ───── */}
           {isolated &&
+            showAllRoutes &&
+            allRoutes.map((r) =>
+              r.paths.map((path, i) => {
+                const active = r.kind === scenarioKind;
+                return (
+                  <Polyline
+                    key={`cmp-${r.kind}-${i}`}
+                    positions={path}
+                    className={active ? 'tw-route-glow' : undefined}
+                    pathOptions={{
+                      color: APPROACH_COLORS[r.scenario.kind] ?? '#666',
+                      weight: active ? 5.5 : 3,
+                      opacity: active ? 0.95 : 0.55,
+                      lineCap: 'round',
+                      dashArray: r.scenario.modePath.includes('Air') ? '2 8' : undefined,
+                    }}
+                    eventHandlers={onSelectKind ? { click: () => onSelectKind(r.kind) } : undefined}
+                  >
+                    <Tooltip sticky className="tw-chip">
+                      <strong>{r.scenario.label}</strong> · {r.scenario.modePath.join(' → ')}
+                      <br />
+                      {formatTonnes(r.scenario.co2eTonnes)} CO₂e · {formatDistance(r.distanceKm)} · {formatLitres(r.fuelLitres)}
+                      <br />
+                      ~{Math.round(r.scenario.transitDays)} days · click to highlight this option
+                    </Tooltip>
+                  </Polyline>
+                );
+              }),
+            )}
+
+          {/* ── ISOLATED VIEW — one shipment, end to end ───────────────── */}
+          {isolated && !showAllRoutes && isoLegs.map(({ i, path }) => <Polyline key={`sh-${i}`} positions={path} pathOptions={{ color: '#0B1F2A', weight: 8, opacity: 0.16, lineCap: 'round' }} />)}
+          {isolated &&
+            !showAllRoutes &&
             isoLegs.map(({ leg, i, path }) => (
               <Polyline key={`mn-${i}`} positions={path} className="tw-route-glow" pathOptions={{ color: MODE_COLORS[leg.modeLabel] ?? '#666', weight: 5, opacity: 0.95, lineCap: 'round', dashArray: leg.mode === 'air' ? '2 8' : undefined }} />
             ))}
-          {isolated && isoLegs.map(({ i, path }) => <Polyline key={`fl-${i}`} positions={path} className="tw-route-animated" pathOptions={{ color: '#fff', weight: 2, opacity: 0.85 }} />)}
-          {/* Mode badges with ×N vehicle count; leg metrics on hover (keeps the map clean) */}
+          {isolated && !showAllRoutes && isoLegs.map(({ i, path }) => <Polyline key={`fl-${i}`} positions={path} className="tw-route-animated" pathOptions={{ color: '#fff', weight: 2, opacity: 0.85 }} />)}
+          {/* Mode badges with ×N vehicle count; leg metrics on hover. In compare
+              mode they follow the HIGHLIGHTED option so vehicles stay visible. */}
           {isolated &&
             isoLegs.map(({ leg, i, path }) => (
               <Marker key={`bd-${i}`} position={midOf(path)} icon={badgeIcon(leg.modeLabel, true, leg.vehicleCount)}>
@@ -240,16 +318,19 @@ export function WorldMap({
                 </Tooltip>
               </Marker>
             ))}
-          {/* Origin & destination names stay pinned; intermediate ports show on hover */}
+          {/* Origin & destination names stay pinned; intermediate ports show on hover.
+              In compare mode only the endpoints render — ports differ per option. */}
           {isolated &&
-            waypoints.map((w, i) => (
-              <Marker key={`wp-${i}`} position={w.pt} icon={pinIcon(w.kind)} interactive={w.kind === 'port'}>
-                <Tooltip permanent={w.kind !== 'port'} direction="top" offset={[0, -31]} className="tw-place">
-                  {w.name}
-                  {w.kind === 'origin' ? ' · Origin' : w.kind === 'dest' ? ' · Destination' : ' · Port'}
-                </Tooltip>
-              </Marker>
-            ))}
+            waypoints
+              .filter((w) => !showAllRoutes || w.kind !== 'port')
+              .map((w, i) => (
+                <Marker key={`wp-${i}`} position={w.pt} icon={pinIcon(w.kind)} interactive={w.kind === 'port'}>
+                  <Tooltip permanent={w.kind !== 'port'} direction="top" offset={[0, -31]} className="tw-place">
+                    {w.name}
+                    {w.kind === 'origin' ? ' · Origin' : w.kind === 'dest' ? ' · Destination' : ' · Port'}
+                  </Tooltip>
+                </Marker>
+              ))}
         </MapContainer>
 
         {/* Collapsible end-to-end summary (so it never blocks the route) */}
@@ -264,7 +345,62 @@ export function WorldMap({
             Route summary
           </Button>
         )}
-        {isolated && detail && totals && summaryOpen && (
+        {/* Compare panel — the four options side by side; click a row to highlight its trace */}
+        {isolated && detail && showAllRoutes && summaryOpen && (
+          <Box sx={{ position: 'absolute', top: 12, right: 12, zIndex: 1000, p: 1.5, width: 296, maxWidth: '86%', borderRadius: 1.5, bgcolor: alpha(theme.palette.background.paper, 0.97), border: 1, borderColor: 'divider', boxShadow: 3 }}>
+            <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+              <Typography variant="caption" color="primary.main" sx={{ fontWeight: 700, letterSpacing: '0.04em' }}>
+                ROUTE OPTIONS · THIS SHIPMENT
+              </Typography>
+              <IconButton size="small" onClick={() => setSummaryOpen(false)} sx={{ mt: -0.5, mr: -0.5 }} aria-label="Collapse summary">
+                <CloseRoundedIcon sx={{ fontSize: 16 }} />
+              </IconButton>
+            </Stack>
+            <Typography variant="subtitle2" sx={{ fontWeight: 700, lineHeight: 1.25, mb: 0.75 }}>
+              {detail.origin} → {detail.destCity}
+            </Typography>
+            <Stack spacing={0.5}>
+              {allRoutes.map((r) => {
+                const active = r.kind === scenarioKind;
+                return (
+                  <Box
+                    key={r.kind}
+                    onClick={() => onSelectKind?.(r.kind)}
+                    sx={{
+                      p: 0.75,
+                      borderRadius: 1.5,
+                      border: 1,
+                      borderColor: active ? APPROACH_COLORS[r.scenario.kind] : 'divider',
+                      bgcolor: active ? alpha(APPROACH_COLORS[r.scenario.kind] ?? '#666', 0.07) : 'transparent',
+                      cursor: onSelectKind ? 'pointer' : 'default',
+                    }}
+                  >
+                    <Stack direction="row" spacing={0.75} alignItems="center">
+                      <Box sx={{ width: 9, height: 9, borderRadius: '50%', bgcolor: APPROACH_COLORS[r.scenario.kind], flexShrink: 0 }} />
+                      <Typography variant="caption" sx={{ fontWeight: 700 }}>{r.scenario.label}</Typography>
+                      <Typography variant="caption" sx={{ color: 'text.secondary', ml: 'auto', fontVariantNumeric: 'tabular-nums' }}>
+                        {formatTonnes(r.scenario.co2eTonnes)}
+                      </Typography>
+                    </Stack>
+                    <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', pl: 2.1, fontSize: 11.5 }}>
+                      ${Math.round(r.scenario.freightUsd / 100) / 10}K · ~{Math.round(r.scenario.transitDays)}d · {formatDistance(r.distanceKm)} · {formatLitres(r.fuelLitres)}
+                    </Typography>
+                    <Typography variant="caption" sx={{ display: 'block', pl: 2.1, fontSize: 11, color: routeChange(r) ? 'primary.main' : 'text.disabled', fontWeight: routeChange(r) ? 600 : 400 }}>
+                      {routeChange(r) ?? 'same path as booked'}
+                    </Typography>
+                  </Box>
+                );
+              })}
+            </Stack>
+            {onClear && (
+              <Button size="small" fullWidth variant="outlined" startIcon={<LayersClearRoundedIcon />} onClick={onClear} sx={{ mt: 1 }}>
+                Show all routes
+              </Button>
+            )}
+          </Box>
+        )}
+
+        {isolated && detail && totals && !showAllRoutes && summaryOpen && (
           <Box sx={{ position: 'absolute', top: 12, right: 12, zIndex: 1000, p: 1.5, maxWidth: 264, borderRadius: 1.5, bgcolor: alpha(theme.palette.background.paper, 0.96), border: 1, borderColor: 'divider', boxShadow: 3 }}>
             <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
               <Typography variant="caption" color="primary.main" sx={{ fontWeight: 700, letterSpacing: '0.04em' }}>
@@ -303,7 +439,11 @@ export function WorldMap({
       <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" useFlexGap gap={1} sx={{ mt: 1.5 }}>
         <ModeLegend />
         <Typography variant="caption" color="text.secondary">
-          {isolated ? 'Actual routed legs · CO₂e, distance, fuel, days & vehicles per leg' : 'Scroll to zoom · click a shipment lane to trace its full route'}
+          {isolated
+            ? showAllRoutes
+              ? 'All four route options traced · hover a line for its CO₂e, cost, distance and days · click to highlight'
+              : 'Actual routed legs · CO₂e, distance, fuel, days & vehicles per leg'
+            : 'Scroll to zoom · click a shipment lane to trace its full route'}
         </Typography>
       </Stack>
     </Box>
@@ -313,7 +453,7 @@ export function WorldMap({
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <Box>
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
         {label}
       </Typography>
       <Typography variant="body2" sx={{ fontWeight: 700, lineHeight: 1.1 }}>

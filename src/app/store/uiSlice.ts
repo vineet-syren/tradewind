@@ -4,6 +4,8 @@ export interface UiState {
   sidebarOpen: boolean;
   themeMode: 'light' | 'dark';
   selectedLaneId: string | null;
+  /** True when Lane 360 was opened from a shipped/in-transit shipment — route decision is locked. */
+  laneReadOnly: boolean;
   selectedShipmentId: string | null;
 }
 
@@ -11,6 +13,7 @@ const initialState: UiState = {
   sidebarOpen: true,
   themeMode: 'light',
   selectedLaneId: null,
+  laneReadOnly: false,
   selectedShipmentId: null,
 };
 
@@ -27,17 +30,26 @@ const uiSlice = createSlice({
     toggleTheme(state) {
       state.themeMode = state.themeMode === 'light' ? 'dark' : 'light';
     },
-    setSelectedLane(state, action: PayloadAction<string | null>) {
-      state.selectedLaneId = action.payload;
+    setSelectedLane(state, action: PayloadAction<string | { laneId: string; readOnly?: boolean } | null>) {
+      const p = action.payload;
+      if (p && typeof p === 'object') {
+        state.selectedLaneId = p.laneId;
+        state.laneReadOnly = Boolean(p.readOnly);
+      } else {
+        state.selectedLaneId = p;
+        state.laneReadOnly = false;
+      }
       state.selectedShipmentId = null;
     },
     setSelectedShipment(state, action: PayloadAction<string | null>) {
       state.selectedShipmentId = action.payload;
       state.selectedLaneId = null;
+      state.laneReadOnly = false;
     },
     closeDrawer(state) {
       state.selectedLaneId = null;
       state.selectedShipmentId = null;
+      state.laneReadOnly = false;
     },
   },
 });

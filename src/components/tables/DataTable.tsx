@@ -29,6 +29,7 @@ export function DataTable<T>({
   dense = true,
   initialSortKey,
   maxHeight,
+  maxHeightCss,
   selectedRowKey,
 }: {
   columns: Column<T>[];
@@ -38,6 +39,8 @@ export function DataTable<T>({
   dense?: boolean;
   initialSortKey?: string;
   maxHeight?: number;
+  /** CSS max-height (e.g. a `calc(...)` string) — wins over `maxHeight` when set. */
+  maxHeightCss?: string;
   selectedRowKey?: string | null;
 }) {
   const [sortKey, setSortKey] = useState<string | undefined>(initialSortKey);
@@ -64,8 +67,8 @@ export function DataTable<T>({
   };
 
   return (
-    <TableContainer sx={{ maxHeight }}>
-      <Table size={dense ? 'small' : 'medium'} stickyHeader={Boolean(maxHeight)}>
+    <TableContainer sx={{ maxHeight: maxHeightCss ?? maxHeight }}>
+      <Table size={dense ? 'small' : 'medium'} stickyHeader={Boolean(maxHeightCss ?? maxHeight)}>
         <TableHead>
           <TableRow>
             {columns.map((c) => (
@@ -91,7 +94,22 @@ export function DataTable<T>({
               hover={Boolean(onRowClick)}
               selected={isSelected}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
-              sx={{ cursor: onRowClick ? 'pointer' : 'default', '&.Mui-selected, &.Mui-selected:hover': { bgcolor: 'action.selected' } }}
+              tabIndex={onRowClick ? 0 : undefined}
+              onKeyDown={
+                onRowClick
+                  ? (e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onRowClick(row);
+                      }
+                    }
+                  : undefined
+              }
+              sx={{
+                cursor: onRowClick ? 'pointer' : 'default',
+                '&.Mui-selected, &.Mui-selected:hover': { bgcolor: 'action.selected' },
+                '&:focus-visible': { outline: (t) => `2px solid ${t.palette.primary.main}`, outlineOffset: -2 },
+              }}
             >
               {columns.map((c) => (
                 <TableCell key={c.key} align={c.align}>

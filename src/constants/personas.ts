@@ -22,13 +22,6 @@ export const PERSONAS: PersonaDef[] = [
     scope: { kind: 'all' },
   },
   {
-    id: 'analyst',
-    name: 'Sustainability Program Owner',
-    role: 'Hotspots, the recommendation tracker and data confidence.',
-    lens: 'Where to act first, action throughput and evidence quality.',
-    scope: { kind: 'all' },
-  },
-  {
     id: 'procurement',
     name: 'Procurement / Vendor Management',
     role: 'Vendor, processor and LSP influence and governance.',

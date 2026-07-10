@@ -20,7 +20,7 @@ import { useDataSource } from '@/hooks/useDataSource';
 import { useAsync } from '@/hooks/useAsync';
 import { ModeIcon } from '@/components/layout/iconRegistry';
 import type { ApproachKind } from '@/types';
-import { APPROACH_LABEL } from '@/constants/app';
+import { APPROACH_LABEL, STATUS_LABEL } from '@/constants/app';
 import { formatTonnes, formatDistance, formatCurrency, formatNumber, formatWeightTonnes, formatIntensity, formatDate } from '@/utils/format';
 
 const STATUS_COLOR: Record<string, 'success' | 'warning' | 'info' | 'default'> = {
@@ -53,7 +53,7 @@ export function ShipmentDetailDialog({ shipmentId, onClose }: { shipmentId: stri
           <DialogTitle sx={{ pr: 6 }}>
             <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
               <Typography variant="h6" sx={{ fontWeight: 700 }}>{s.origin} → {s.destPort}</Typography>
-              <Chip size="small" color={STATUS_COLOR[s.status] ?? 'default'} label={s.status} />
+              <Chip size="small" color={STATUS_COLOR[s.status] ?? 'default'} label={STATUS_LABEL[s.status] ?? s.status} />
               <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>{s.shipmentId}</Typography>
             </Stack>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
@@ -107,15 +107,18 @@ export function ShipmentDetailDialog({ shipmentId, onClose }: { shipmentId: stri
               </Table>
             </Box>
 
-            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Route &amp; mode options</Typography>
+            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
+              {s.status === 'Planned' ? 'Route & mode options' : 'Route taken'}
+            </Typography>
+            {/* Shipped/in-transit shipments only show the executed route — alternatives are a scheduled-only decision aid. */}
             <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', sm: 'repeat(2,1fr)' } }}>
-              {(['current', 'best', 'balanced', 'optimal'] as const).map((k) => {
+              {(s.status === 'Planned' ? (['current', 'best', 'balanced', 'optimal'] as const) : (['current'] as const)).map((k) => {
                 const sc = s.scenarios[k];
                 if (!sc) return null;
                 return (
                   <Box key={k} sx={{ border: 1, borderColor: 'divider', borderRadius: 1.5, p: 1.25 }}>
                     <Typography variant="caption" sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'text.secondary' }}>
-                      {APPROACH_LABEL[sc.kind as ApproachKind] ?? sc.label}
+                      {s.status === 'Planned' ? APPROACH_LABEL[sc.kind as ApproachKind] ?? sc.label : 'As shipped'}
                     </Typography>
                     <Stack direction="row" spacing={2} sx={{ mt: 0.5, fontVariantNumeric: 'tabular-nums' }}>
                       <Typography variant="body2"><strong>{formatTonnes(sc.co2eTonnes)}</strong> CO₂e</Typography>

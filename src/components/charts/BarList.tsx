@@ -12,7 +12,7 @@ export interface BarListItem {
 export function BarList({
   items,
   valueFormatter,
-  color = '#0C8B7B',
+  color = '#10b981',
   onSelect,
 }: {
   items: BarListItem[];

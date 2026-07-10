@@ -3,7 +3,6 @@ import LaunchRoundedIcon from '@mui/icons-material/LaunchRounded';
 import { useDataSource } from '@/hooks/useDataSource';
 import { useAsync } from '@/hooks/useAsync';
 import { useAppDispatch } from '@/app/store/hooks';
-import { executeRecommendation } from '@/app/store/actionsSlice';
 import { setSelectedLane } from '@/app/store/uiSlice';
 import { ChartContainer } from '@/components/charts/ChartContainer';
 import { ScenarioCompareChart } from '@/components/charts/ScenarioCompareChart';
@@ -11,9 +10,10 @@ import { TableSkeleton } from '@/components/loaders/Skeletons';
 import { ModeChip, SeverityChip } from '@/components/shared/Chips';
 import { LegTimeline } from './LegTimeline';
 import { RecommendationCard } from './RecommendationCard';
+import { STATUS_LABEL } from '@/constants/app';
 import { formatCurrency, formatTonnes, formatIntensity } from '@/utils/format';
 
-export function ShipmentDetailContent({ shipmentId, onToast }: { shipmentId: string; onToast: (m: string) => void }) {
+export function ShipmentDetailContent({ shipmentId }: { shipmentId: string }) {
   const ds = useDataSource();
   const dispatch = useAppDispatch();
   const { data: s, status } = useAsync(() => ds.getShipment(shipmentId), [shipmentId]);
@@ -46,7 +46,7 @@ export function ShipmentDetailContent({ shipmentId, onToast }: { shipmentId: str
             size="small"
             color={s.status === 'Planned' ? 'primary' : s.status === 'In transit' ? 'warning' : 'default'}
             variant={s.status === 'Delivered' ? 'outlined' : 'filled'}
-            label={s.status}
+            label={STATUS_LABEL[s.status] ?? s.status}
           />
           <ModeChip mode={s.primaryMode} />
           {s.airException && <SeverityChip severity={s.airAvoidable ? 'High' : 'Medium'} />}
@@ -91,30 +91,33 @@ export function ShipmentDetailContent({ shipmentId, onToast }: { shipmentId: str
         <LegTimeline legs={s.legs} />
       </Box>
 
-      <ChartContainer title="What-if: route &amp; mode" subtitle="CO₂e per shipment by approach">
-        <ScenarioCompareChart scenarios={s.scenarios} />
-      </ChartContainer>
+      {/* Route alternatives are only a decision aid for scheduled shipments — for shipped ones the decision is history. */}
+      {s.status === 'Planned' ? (
+        <ChartContainer title="What-if: route &amp; mode" subtitle="CO₂e per shipment by approach">
+          <ScenarioCompareChart scenarios={s.scenarios} />
+        </ChartContainer>
+      ) : (
+        <Box sx={{ p: 1.5, borderRadius: 2, border: 1, borderColor: 'divider' }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Route taken</Typography>
+          <Typography variant="body2" color="text.secondary">
+            {s.modePath.join(' → ')} · {formatTonnes(s.co2eTonnes)} CO₂e · {s.transitDays} days transit
+          </Typography>
+        </Box>
+      )}
 
       <Button variant="outlined" startIcon={<LaunchRoundedIcon />} onClick={() => dispatch(setSelectedLane(s.laneId))}>
         Open lane corridor 360
       </Button>
 
-      {s.recommendations.length > 0 && (
+      {s.status === 'Planned' && s.recommendations.length > 0 && (
         <Box>
           <Divider sx={{ mb: 2 }} />
           <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>
-            Reduction actions
+            Reduction suggestions
           </Typography>
           <Stack spacing={1.5}>
             {s.recommendations.map((r) => (
-              <RecommendationCard
-                key={r.id}
-                rec={r}
-                onExecute={() => {
-                  dispatch(executeRecommendation(r));
-                  onToast(`Action queued · ${r.title}`);
-                }}
-              />
+              <RecommendationCard key={r.id} rec={r} />
             ))}
           </Stack>
         </Box>
