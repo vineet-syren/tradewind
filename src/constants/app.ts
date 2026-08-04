@@ -1,8 +1,12 @@
-/** App-wide constants. APP_TODAY mirrors the generator's frozen as-of date. */
-export const APP_TODAY = '2026-06-30';
-
-/** Forward-planning window (days) for the Scheduler — matches the generator. */
-export const PLAN_HORIZON_DAYS = 100;
+/**
+ * App-wide constants.
+ *
+ * `APP_TODAY` is the day after the last dispatch date in the source workbook —
+ * the app positions itself the morning after the data closes, so "still to be
+ * planned" means exactly that. It must stay in step with `ASSUMPTIONS.asOf`
+ * emitted by `scripts/generate-mock-data.mjs`.
+ */
+export const APP_TODAY = '2024-07-01';
 
 /** Add days to a YYYY-MM-DD string (UTC), returning YYYY-MM-DD. */
 export function addDaysISO(iso: string, n: number): string {
@@ -13,10 +17,12 @@ export function addDaysISO(iso: string, n: number): string {
 
 export const APP_META = {
   name: 'Tradewind',
-  tagline: 'Steer every shipment to its lowest-carbon lane.',
+  tagline: 'Every route option, priced in carbon, from your own shipment records.',
   company: 'Terova',
-  scope: 'Scope 3 · Downstream Transportation',
+  scope: 'Scope 3 · Downstream transportation',
   longName: 'Tradewind — Downstream Transportation Carbon Decisioning',
+  /** Shown wherever the app needs to say where its numbers come from. */
+  sourceLabel: 'Transport Downstream- V02.xlsx',
 } as const;
 
 /** Modes and their brand colours (used by charts, the map, and chips). */
@@ -27,23 +33,17 @@ export const MODE_COLORS: Record<string, string> = {
   Air: '#f43f5e',
 };
 
-export const APPROACH_COLORS: Record<string, string> = {
+/** Route-option colours — current is neutral, alternatives are shades of green. */
+export const OPTION_COLORS: Record<string, string> = {
   current: '#64748b',
-  optimal: '#f43f5e',
-  balanced: '#f59e0b',
-  best_co2: '#10b981',
+  'gateway-swap': '#10b981',
+  'shorter-sea': '#0ea5e9',
+  'sea-instead-of-air': '#059669',
+  consolidate: '#14b8a6',
 };
 
-export const APPROACH_LABEL: Record<string, string> = {
-  current: 'Current',
-  optimal: 'Fastest',
-  balanced: 'Balanced',
-  best_co2: 'Best for CO₂',
-};
-
-/** Display labels for shipment status — data keeps 'Planned'; the UI says "To be planned". */
+/** Display labels for shipment status — data keeps 'Planned'; the UI spells it out. */
 export const STATUS_LABEL: Record<string, string> = {
-  Delivered: 'Delivered',
-  'In transit': 'In transit',
+  Delivered: 'Shipped',
   Planned: 'To be planned',
 };

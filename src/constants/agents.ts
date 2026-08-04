@@ -1,53 +1,44 @@
 import type { AgentCatalogEntry } from '@/types';
 
-/** The decisioning agents surfaced across Tradewind. */
+/**
+ * What the app does to the workbook, described as the four jobs it performs.
+ * Each one is a real step in `scripts/generate-mock-data.mjs`, not a promise.
+ */
 export const AGENT_CATALOG: AgentCatalogEntry[] = [
   {
-    id: 'footprint',
-    name: 'Footprint & Hotspot Agent',
-    role: 'Baseline & hotspots',
-    description: 'Builds the downstream-transport CO₂e baseline from shipment data and ranks the highest-emitting lanes, products, customers, ports and partners.',
+    id: 'ingest',
+    name: 'Workbook reader',
+    role: 'Rebuild shipments from the sheet',
+    description:
+      'Reads all five modal blocks on each year tab and rejoins them into whole shipments — factory to depot, depot to gateway, then the sailing or flight. Every leg keeps the cell range it came from, and each tab is tied back to the total the workbook itself prints.',
+    autonomy: 'auto',
+    iconKey: 'evidence',
+  },
+  {
+    id: 'hotspots',
+    name: 'Hotspot finder',
+    role: 'Where the carbon sits',
+    description:
+      'Ranks CO₂e by product, destination port, gateway, market and mode, and separates the export chain from the first-mile collection runs.',
     autonomy: 'auto',
     iconKey: 'hotspots',
   },
   {
-    id: 'route-mode',
-    name: 'Route & Mode Agent',
-    role: 'Route, mode & port decisioning',
-    description: 'Compares Optimal, Balanced and Best-for-CO₂ paths for every lane, balancing CO₂e, cost and transit time against SLAs.',
-    autonomy: 'assisted',
+    id: 'options',
+    name: 'Route option pricer',
+    role: 'What else the workbook proves is possible',
+    description:
+      'Re-costs each shipment through leg chains the workbook records for other shipments, using its own distances and emission factors. An option only appears if every leg it needs exists in the sheet.',
+    autonomy: 'auto',
     iconKey: 'decisioning',
   },
   {
-    id: 'mode-governance',
-    name: 'Mode Governance Agent',
-    role: 'Air-exception control',
-    description: 'Flags air shipments, classifies them as avoidable or justified, and proposes ocean alternatives with planning lead time.',
-    autonomy: 'assisted',
+    id: 'exceptions',
+    name: 'Exception watch',
+    role: 'Air, part loads and data faults',
+    description:
+      'Flags shipments that flew, dedicated truck runs carrying a fraction of a load, and rows the workbook duplicates or contradicts itself on.',
+    autonomy: 'auto',
     iconKey: 'air',
-  },
-  {
-    id: 'consolidation',
-    name: 'Consolidation Agent',
-    role: 'Shipment consolidation',
-    description: 'Finds small, frequent shipments that can be consolidated into full containers to cut trips and inland road legs.',
-    autonomy: 'auto',
-    iconKey: 'consolidation',
-  },
-  {
-    id: 'partner',
-    name: 'Partner Influence Agent',
-    role: 'Vendor / processor / LSP',
-    description: 'Maps emissions to vendors, processors and logistics providers and surfaces data-backed governance actions Terova can influence.',
-    autonomy: 'assisted',
-    iconKey: 'partners',
-  },
-  {
-    id: 'evidence',
-    name: 'Evidence & Reporting Agent',
-    role: 'ESG evidence',
-    description: 'Tracks estimated vs realized reductions and assembles report-ready, methodology-backed evidence for ESG and annual reporting.',
-    autonomy: 'auto',
-    iconKey: 'evidence',
   },
 ];

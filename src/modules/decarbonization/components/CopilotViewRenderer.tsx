@@ -6,10 +6,9 @@ import OpenInNewRoundedIcon from '@mui/icons-material/OpenInNewRounded';
 import type { CopilotView, Lane, Recommendation } from '@/types';
 import { KpiCard } from '@/components/cards/KpiCard';
 import { ModeSplitDonut } from '@/components/charts/ModeSplitDonut';
-import { ScenarioCompareChart } from '@/components/charts/ScenarioCompareChart';
+import { RouteOptionCard } from '@/modules/decarbonization/components/RouteOptionCard';
 import { TYPE_META } from '@/constants/actionTypes';
-import { APPROACH_LABEL } from '@/constants/app';
-import { formatSignedCurrency, formatTonnes, formatIntensity } from '@/utils/format';
+import { formatTonnes, formatIntensity } from '@/utils/format';
 
 const MAX_ROWS = 5;
 
@@ -33,8 +32,14 @@ export function CopilotViewRenderer({ view, onOpenLane }: { view: CopilotView; o
   if (view.kind === 'modeSplit' && view.modeSplit)
     return <ModeSplitDonut data={view.modeSplit} />;
 
-  if (view.kind === 'scenario' && view.scenarios)
-    return <ScenarioCompareChart scenarios={view.scenarios} height={200} />;
+  if (view.kind === 'options' && view.options)
+    return (
+      <Stack spacing={1}>
+        {view.options.map((o) => (
+          <RouteOptionCard key={o.id} option={o} compact />
+        ))}
+      </Stack>
+    );
 
   if (view.kind === 'hotspots' && view.hotspots) {
     const total = view.hotspots.reduce((s, h) => s + h.co2eTonnes, 0);
@@ -64,19 +69,19 @@ export function CopilotViewRenderer({ view, onOpenLane }: { view: CopilotView; o
         rows={view.lanes.slice(0, MAX_ROWS).map((l: Lane) => ({
           id: l.laneId,
           title: `${l.origin} → ${l.destPort}`,
-          subtitle: l.customer,
-          right: `${formatTonnes(l.realizableReductionTonnes)}/yr`,
+          subtitle: `${l.category} · ${l.market}`,
+          right: formatTonnes(l.avoidableTonnes),
           rightHint: 'avoidable',
           detail: (
             <Stack spacing={1}>
               <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
                 <Chip size="small" variant="outlined" label={`${formatTonnes(l.totalCo2eTonnes)} total CO₂e`} />
                 <Chip size="small" variant="outlined" label={`${formatIntensity(l.avgCo2ePerTonneKm)} intensity`} />
-                <Chip size="small" variant="outlined" color="primary" label={`suggested: ${APPROACH_LABEL[l.recommendedApproach]}`} />
+                {l.bestOptionLabel && <Chip size="small" variant="outlined" color="primary" label={`suggested: ${l.bestOptionLabel}`} />}
               </Stack>
               {onOpenLane && (
                 <Button size="small" variant="outlined" startIcon={<OpenInNewRoundedIcon />} onClick={() => onOpenLane(l.laneId)} sx={{ alignSelf: 'flex-start' }}>
-                  Open Lane 360
+                  Open this lane
                 </Button>
               )}
             </Stack>
@@ -93,20 +98,24 @@ export function CopilotViewRenderer({ view, onOpenLane }: { view: CopilotView; o
           id: r.id,
           chip: TYPE_META[r.type]?.label,
           title: r.title,
-          right: `−${formatTonnes(r.estCo2eSavingTonnes)}/yr`,
+          right: `−${formatTonnes(r.estCo2eSavingTonnes)}`,
           detail: (
             <Stack spacing={1}>
               <Typography variant="body2" color="text.secondary">
                 {r.rationale}
               </Typography>
               <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
-                <Chip size="small" variant="outlined" color="success" label={`saves ${formatTonnes(r.estCo2eSavingTonnes)}/yr`} />
-                <Chip size="small" variant="outlined" label={`freight ${formatSignedCurrency(r.costImpactUsd)}/yr`} />
-                <Chip size="small" variant="outlined" label={`${Math.round(r.confidence)}% confidence`} />
+                <Chip size="small" variant="outlined" color="success" label={`saves ${formatTonnes(r.estCo2eSavingTonnes)}`} />
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  label={r.transitImpactDays === 0 ? 'same transit' : `${r.transitImpactDays > 0 ? '+' : '−'}${Math.abs(r.transitImpactDays)}d (est.)`}
+                />
+                <Chip size="small" variant="outlined" label={`${r.complexity} effort`} />
               </Stack>
               {onOpenLane && r.laneId && (
                 <Button size="small" variant="outlined" startIcon={<OpenInNewRoundedIcon />} onClick={() => onOpenLane(r.laneId!)} sx={{ alignSelf: 'flex-start' }}>
-                  Open Lane 360
+                  Open this lane
                 </Button>
               )}
             </Stack>

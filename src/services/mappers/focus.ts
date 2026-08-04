@@ -1,51 +1,107 @@
-/** Persona-tailored "focus" KPIs for the Command Center landing. */
+/** Persona-tailored headline KPIs. */
 import type { ExceptionItem, Footprint, KpiMetric, PersonaId, Recommendation } from '@/types';
 
 interface FocusCtx {
   footprint: Footprint;
-  recs: Recommendation[];
+  /** Decisions still open — i.e. on freight that has not shipped yet. */
+  openRecs: Recommendation[];
   exceptions: ExceptionItem[];
 }
 
-const tonnes = (n: number): string => (n >= 100 ? `${Math.round(n)} t` : `${n.toFixed(1)} t`);
+const tonnes = (n: number): string => (n >= 100 ? `${Math.round(n)} t` : `${n.toFixed(2)} t`);
 
 export function buildFocusKpis(persona: PersonaId, ctx: FocusCtx): KpiMetric[] {
-  const { footprint: f, recs } = ctx;
-  const ocean = f.modeSplit.find((m) => m.mode === 'Ocean');
-  const influenceable = recs
-    .filter((r) => r.controllability.startsWith('Influence'))
-    .reduce((s, r) => s + r.estCo2eSavingTonnes, 0);
-  const partnerActions = recs.filter((r) => r.type === 'lsp-swap' || r.type === 'vendor-intervention').length;
+  const { footprint: f, openRecs, exceptions } = ctx;
+  const atStake = openRecs.reduce((s, r) => s + r.estCo2eSavingTonnes, 0);
+  const biggest = [...openRecs].sort((a, b) => b.estCo2eSavingTonnes - a.estCo2eSavingTonnes)[0];
 
-  switch (persona) {
-    case 'logistics':
-      return [
-        { id: 'live', label: 'Live shipments', value: f.liveShipmentCount, unit: 'number', intent: f.liveShipmentCount ? 'opportunity' : 'neutral', hint: 'in transit / planned — decide now' },
-        { id: 'top-lane', label: 'Top lane opportunity', value: f.topLanes[0]?.realizableReductionTonnes ?? 0, unit: 'tonnes', display: tonnes(f.topLanes[0]?.realizableReductionTonnes ?? 0) + '/yr', intent: 'opportunity', hint: f.topLanes[0]?.label ?? '—' },
-        { id: 'air', label: 'Air exceptions', value: f.airExceptionCount, unit: 'number', intent: f.airExceptionCount ? 'negative' : 'positive', hint: `${f.airAvoidableCount} avoidable` },
-        { id: 'ocean', label: 'Ocean-led share', value: ocean?.pct ?? 0, unit: 'percent', intent: 'positive', hint: 'of CO₂e' },
-      ];
-    case 'procurement':
-      return [
-        { id: 'infl', label: 'Influenceable saving', value: influenceable, unit: 'tonnes', display: tonnes(influenceable) + '/yr', intent: 'opportunity', hint: 'via vendors & LSPs' },
-        { id: 'partner-actions', label: 'Partner actions', value: partnerActions, unit: 'number', intent: 'neutral', hint: 'LSP & vendor plays' },
-        { id: 'opp', label: 'Reduction opportunity', value: f.reductionOpportunityTonnes, unit: 'tonnes', display: tonnes(f.reductionOpportunityTonnes) + '/yr', intent: 'opportunity', hint: `${f.reductionOpportunityPct}% realizable` },
-        { id: 'co2e', label: 'Annual CO₂e', value: f.annualCo2eTonnes, unit: 'tonnes', intent: 'neutral', hint: 'downstream transport' },
-      ];
-    case 'analyst':
-      return [
-        { id: 'actions', label: 'Open actions', value: recs.length, unit: 'number', intent: 'neutral', hint: 'awaiting decision' },
-        { id: 'opp', label: 'Realizable reduction', value: f.reductionOpportunityTonnes, unit: 'tonnes', display: tonnes(f.reductionOpportunityTonnes) + '/yr', intent: 'opportunity', hint: `${f.reductionOpportunityPct}% of footprint` },
-        { id: 'realized', label: 'Realized reduction', value: f.realizedReductionPct, unit: 'percent', intent: 'positive', hint: 'vs baseline' },
-        { id: 'lanes', label: 'Lanes in scope', value: f.laneCount, unit: 'number', intent: 'neutral', hint: 'decisioning corridors' },
-      ];
-    case 'cso':
-    default:
-      return [
-        { id: 'co2e', label: 'Annual downstream CO₂e', value: f.annualCo2eTonnes, unit: 'tonnes', display: tonnes(f.annualCo2eTonnes) + '/yr', intent: 'neutral', hint: 'Scope 3 transport' },
-        { id: 'realized', label: 'Realized reduction', value: f.realizedReductionPct, unit: 'percent', intent: 'positive', hint: 'vs baseline year' },
-        { id: 'opp', label: 'Reduction opportunity', value: f.reductionOpportunityTonnes, unit: 'tonnes', display: tonnes(f.reductionOpportunityTonnes) + '/yr', intent: 'opportunity', hint: `${f.reductionOpportunityPct}% realizable` },
-        { id: 'ambition', label: 'Ambition', value: f.ambitionPct, unit: 'percent', intent: 'neutral', hint: 'medium-term target' },
-      ];
+  if (persona === 'logistics') {
+    return [
+      {
+        id: 'decisions',
+        label: 'Decisions to make',
+        value: openRecs.length,
+        unit: 'number',
+        intent: openRecs.length ? 'opportunity' : 'positive',
+        hint: openRecs.length ? 'on freight not yet shipped' : 'nothing outstanding',
+        icon: 'decisioning',
+      },
+      {
+        id: 'at-stake',
+        label: 'CO₂e at stake',
+        value: atStake,
+        unit: 'tonnes',
+        display: tonnes(atStake),
+        intent: 'opportunity',
+        hint: 'if every suggestion is taken',
+        icon: 'co2e',
+      },
+      {
+        id: 'biggest',
+        label: 'Biggest single win',
+        value: biggest?.estCo2eSavingTonnes ?? 0,
+        unit: 'tonnes',
+        display: tonnes(biggest?.estCo2eSavingTonnes ?? 0),
+        intent: 'opportunity',
+        hint: biggest ? `${biggest.laneLabel} · ${biggest.shipmentDate}` : '—',
+        icon: 'lanes',
+      },
+      {
+        id: 'road',
+        label: 'Road share of CO₂e',
+        value: f.totalCo2eTonnes > 0 ? Math.round((f.roadCo2eTonnes / f.totalCo2eTonnes) * 100) : 0,
+        unit: 'percent',
+        intent: 'neutral',
+        hint: 'charged per truck run, not per tonne',
+        icon: 'carrier',
+      },
+    ];
   }
+
+  // CSO — the reporting lens.
+  const dataIssues = exceptions.filter((e) => e.kind === 'data-quality').length;
+  return [
+    {
+      id: 'latest',
+      label: `CO₂e · ${f.latestReportingYear}`,
+      value: f.latestYearCo2eTonnes,
+      unit: 'tonnes',
+      display: tonnes(f.latestYearCo2eTonnes),
+      intent: 'neutral',
+      hint: 'latest complete reporting year',
+      deltaPct: f.yoyChangePct ?? undefined,
+      deltaLabel: 'vs prior year',
+      betterWhenLower: true,
+      icon: 'co2e',
+    },
+    {
+      id: 'avoidable',
+      label: 'Avoidable on proven routes',
+      value: f.avoidableTonnes,
+      unit: 'tonnes',
+      display: tonnes(f.avoidableTonnes),
+      intent: 'opportunity',
+      hint: `${f.avoidablePct}% of the footprint in scope`,
+      icon: 'decisioning',
+    },
+    {
+      id: 'air',
+      label: 'Air freight CO₂e',
+      value: f.airCo2eTonnes,
+      unit: 'tonnes',
+      display: tonnes(f.airCo2eTonnes),
+      intent: f.airShipmentCount ? 'negative' : 'positive',
+      hint: `${f.airShipmentCount} shipment${f.airShipmentCount === 1 ? '' : 's'} flown`,
+      icon: 'air',
+    },
+    {
+      id: 'quality',
+      label: 'Data issues to fix',
+      value: dataIssues,
+      unit: 'number',
+      intent: dataIssues ? 'risk' : 'positive',
+      hint: dataIssues ? 'duplicated or conflicting rows' : 'workbook is internally consistent',
+      icon: 'evidence',
+    },
+  ];
 }

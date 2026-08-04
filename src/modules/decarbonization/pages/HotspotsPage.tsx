@@ -1,245 +1,229 @@
 import { useMemo, useState } from 'react';
-import { Box, Card, Chip, MenuItem, Stack, TextField, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material';
+import { Box, Card, CardContent, MenuItem, Stack, TextField, Typography } from '@mui/material';
+import LocalFireDepartmentRounded from '@mui/icons-material/LocalFireDepartmentRounded';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ScopeNote } from '@/components/layout/ScopeNote';
 import { FilterPanel } from '@/components/filters/FilterPanel';
-import { KpiCard } from '@/components/cards/KpiCard';
-import { EquivalentsStrip } from '@/components/cards/EquivalentsStrip';
 import { ChartContainer } from '@/components/charts/ChartContainer';
-import { IntensityRanking } from '@/components/charts/IntensityRanking';
+import { BarList } from '@/components/charts/BarList';
 import { TreemapChart } from '@/components/charts/TreemapChart';
-import { YearOverYearChart } from '@/components/charts/YearOverYearChart';
-import { MoMTrendChart } from '@/components/charts/MoMTrendChart';
+import { ModeSplitDonut } from '@/components/charts/ModeSplitDonut';
 import { ModeTrendArea } from '@/components/charts/ModeTrendArea';
-import { SankeyChart } from '@/components/charts/SankeyChart';
 import { HeatmapChart } from '@/components/charts/HeatmapChart';
-import { KpiSkeleton, ChartSkeleton } from '@/components/loaders/Skeletons';
-import ShowChartRounded from '@mui/icons-material/ShowChartRounded';
-import LayersRounded from '@mui/icons-material/LayersRounded';
-import TravelExploreRounded from '@mui/icons-material/TravelExploreRounded';
-import AccountTreeRounded from '@mui/icons-material/AccountTreeRounded';
-import GridOnRounded from '@mui/icons-material/GridOnRounded';
-import FilterAltRoundedIcon from '@mui/icons-material/FilterAltRounded';
+import { SankeyChart } from '@/components/charts/SankeyChart';
+import { IntensityRanking } from '@/components/charts/IntensityRanking';
+import { KpiCard } from '@/components/cards/KpiCard';
+import { ChartSkeleton } from '@/components/loaders/Skeletons';
 import { EmptyState } from '@/components/shared/EmptyState';
-import { ScopePrompt } from '@/components/filters/ScopePrompt';
 import { useDataSource } from '@/hooks/useDataSource';
 import { useAsync } from '@/hooks/useAsync';
 import { useAppSelector } from '@/app/store/hooks';
-import { countActiveFilters } from '@/app/store/filtersSlice';
-import type { HotspotDimension, KpiMetric } from '@/types';
-import { formatPeriod, formatTonnes } from '@/utils/format';
+import type { HotspotDimension, HotspotRow, MonthModeRow } from '@/types';
 import {
   insightsForFlows,
   insightsForHotspots,
+  insightsForModeSplit,
   insightsForMonthlyByMode,
+  insightsForRegionModes,
   insightsForSeasonality,
-  insightsForMonthOverMonth,
-  insightsForYearOverYear,
 } from '@/utils/insights';
+import { formatTonnes } from '@/utils/format';
 
-const DIMENSIONS: { key: HotspotDimension; label: string }[] = [
-  { key: 'byCustomer', label: 'Customer' },
-  { key: 'byProductCategory', label: 'Product category' },
-  { key: 'byMarket', label: 'Destination market' },
-  { key: 'byDestPort', label: 'Destination port' },
-  { key: 'byOriginPort', label: 'Origin gateway' },
-  { key: 'byLsp', label: 'Carrier' },
-  { key: 'byVendor', label: 'Vendor / processor' },
-  { key: 'byOrigin', label: 'Origin region' },
+const MODES = ['Ocean', 'Rail', 'Road', 'Air'] as const;
+
+/** Chart-shape adapters — the charts speak label/value, the domain speaks CO₂e. */
+const toBars = (rows: HotspotRow[]) =>
+  rows.map((r) => ({
+    label: r.label,
+    value: r.co2eTonnes,
+    sub: r.shipments ? `${r.shipments} movement${r.shipments === 1 ? '' : 's'}` : undefined,
+  }));
+const toTreemap = (rows: HotspotRow[]) => rows.map((r) => ({ name: r.label, size: r.co2eTonnes }));
+const toIntensity = (rows: HotspotRow[]) =>
+  [...rows]
+    .sort((a, b) => b.co2ePerTonneKm - a.co2ePerTonneKm)
+    .map((r) => ({ label: r.label, value: r.co2ePerTonneKm, sub: formatTonnes(r.co2eTonnes) }));
+
+const DIMENSIONS: { key: HotspotDimension; label: string; noun: string }[] = [
+  { key: 'byCategory', label: 'Product category', noun: 'product category' },
+  { key: 'byProduct', label: 'Product', noun: 'product' },
+  { key: 'byDestPort', label: 'Destination port', noun: 'destination port' },
+  { key: 'byMarket', label: 'Market', noun: 'destination market' },
+  { key: 'byGateway', label: 'Gateway port', noun: 'gateway port' },
+  { key: 'byMode', label: 'Transport mode', noun: 'transport mode' },
 ];
+
+/** Where the footprint actually sits, sliced by every dimension the workbook holds. */
 export default function HotspotsPage() {
   const ds = useDataSource();
   const persona = useAppSelector((s) => s.persona.current);
   const filters = useAppSelector((s) => s.filters.value);
-  // No filters, no data pull — the page waits until the user scopes the view.
-  const hasFilters = countActiveFilters(filters) > 0;
-  const { data: hotspots } = useAsync(() => (hasFilters ? ds.getHotspots({ persona, filters }) : Promise.resolve(null)), [persona, filters]);
-  const { data: footprint } = useAsync(() => (hasFilters ? ds.getFootprint({ persona, filters }) : Promise.resolve(null)), [persona, filters]);
+  const { data: hotspots, status } = useAsync(() => ds.getHotspots({ persona, filters }), [persona, filters]);
+  const { data: footprint } = useAsync(() => ds.getFootprint({ persona, filters }), [persona, filters]);
+  const [dimension, setDimension] = useState<HotspotDimension>('byCategory');
 
-  const [dimension, setDimension] = useState<HotspotDimension>('byCustomer');
-  const [trendView, setTrendView] = useState<'yoy' | 'mom'>('yoy');
-  // Clicking a YoY bar drills into that year's months.
-  const [momYear, setMomYear] = useState<number | null>(null);
-  // Month-over-month rows: total CO₂e per month (all transport modes summed).
-  // With a drilled year, exactly that year's months; otherwise the last 18.
-  const momRows = useMemo(() => {
-    const all = hotspots?.monthlyByMode ?? [];
-    const scoped = momYear ? all.filter((m) => m.period.startsWith(String(momYear))) : all.slice(-18);
-    return scoped.map((m) => ({ label: formatPeriod(m.period), value: m.Ocean + m.Rail + m.Road + m.Air }));
-  }, [hotspots, momYear]);
-  const drillIntoYear = (year: number) => {
-    setMomYear(year);
-    setTrendView('mom');
-  };
-  const rows = hotspots ? hotspots[dimension] : [];
-  const dimensionLabel = DIMENSIONS.find((d) => d.key === dimension)?.label ?? 'dimension';
+  const dim = DIMENSIONS.find((d) => d.key === dimension)!;
+  const rows = hotspots?.[dimension] ?? [];
+  const collection = hotspots?.byCollectionOrigin ?? [];
 
-  // Mode × month matrix (last 12 periods) for the seasonality heat map.
-  const heatmap = useMemo(() => {
-    const months = (hotspots?.monthlyByMode ?? []).slice(-12);
-    const modes = ['Ocean', 'Rail', 'Road', 'Air'] as const;
-    return {
-      rows: modes as unknown as string[],
-      cols: months.map((m) => formatPeriod(m.period)),
-      values: modes.map((mode) => months.map((m) => m[mode])),
-    };
-  }, [hotspots]);
-
-  // Progress vs the 2020 baseline (robust, and the reduction journey the program
-  // is measured against). Compare the latest complete year to the baseline year.
-  const years = footprint?.byYear ?? [];
-  const latestY = years.length >= 2 ? years[years.length - 2] : years[years.length - 1]; // skip partial current year
-  const baseY = years[0];
-  const baseLabel = latestY && baseY && latestY.year !== baseY.year ? `vs ${baseY.year} baseline` : undefined;
-  const pctChange = (cur?: number, prev?: number) => (prev ? ((cur! - prev) / prev) * 100 : undefined);
-
-  const kpis: KpiMetric[] | undefined = !footprint ? undefined : [
-    { id: 'co2e', label: 'Annual downstream CO₂e', value: footprint.annualCo2eTonnes, unit: 'tonnes', display: `${formatTonnes(footprint.annualCo2eTonnes)}/yr`, intent: 'neutral', icon: 'co2e', hint: `${footprint.shipmentCount} shipments` },
-    { id: 'intensity', label: 'CO₂ per ton-km', value: footprint.avgIntensity, unit: 'intensity', intent: 'neutral', icon: 'intensity', deltaPct: pctChange(latestY?.intensity, baseY?.intensity), deltaLabel: baseLabel, betterWhenLower: true, hint: 'the core efficiency metric' },
-    { id: 'top5', label: 'Top-5 customer share', value: footprint.top5CustomerSharePct, unit: 'percent', intent: footprint.top5CustomerSharePct > 50 ? 'risk' : 'neutral', icon: 'concentration', hint: 'concentration of CO₂e' },
-    { id: 'air', label: 'Air CO₂e', value: footprint.airCo2eTonnes, unit: 'tonnes', display: formatTonnes(footprint.airCo2eTonnes), intent: 'risk', icon: 'air', hint: `${footprint.airExceptionCount} air shipments` },
-  ];
+  const kpis = useMemo(() => {
+    if (!footprint) return [];
+    return [
+      { id: 'total', label: 'CO₂e in scope', value: footprint.totalCo2eTonnes, unit: 'tonnes' as const, intent: 'neutral' as const, hint: `${footprint.shipmentCount} movements`, icon: 'co2e' },
+      { id: 'avoidable', label: 'Avoidable on proven routes', value: footprint.avoidableTonnes, unit: 'tonnes' as const, intent: 'opportunity' as const, hint: `${footprint.avoidablePct}% of scope`, icon: 'decisioning' },
+      { id: 'road', label: 'Road legs', value: footprint.roadCo2eTonnes, unit: 'tonnes' as const, intent: 'risk' as const, hint: 'charged per truck run', icon: 'carrier' },
+      { id: 'intensity', label: 'Intensity', value: footprint.avgIntensity, unit: 'intensity' as const, intent: 'neutral' as const, hint: 'g CO₂e per tonne-km', icon: 'lanes' },
+    ];
+  }, [footprint]);
 
   return (
     <Box>
       <PageHeader
-        overline="Visibility · Footprint & Hotspot Agent"
+        overline="Understand · where the carbon sits"
         title="Emission Hotspots"
-        subtitle="Trend, concentration and intensity in one view. Track year-over-year, see the mode mix over time, then explore any dimension — customer, product, carrier, port — for CO₂e and CO₂ per ton-km."
+        subtitle="The same CO₂e, sliced every way the workbook supports — product, port, gateway, market and mode."
         actions={<ScopeNote />}
       />
       <FilterPanel />
 
-      {!hasFilters ? (
+      {kpis.length > 0 && (
+        <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(4, 1fr)' }, mb: 3 }}>
+          {kpis.map((k) => (
+            <KpiCard key={k.id} metric={k} />
+          ))}
+        </Box>
+      )}
+
+      {status === 'loading' || !hotspots ? (
+        <ChartSkeleton height={420} />
+      ) : !rows.length ? (
         <Card>
           <EmptyState
-            icon={<FilterAltRoundedIcon sx={{ fontSize: 44 }} />}
-            title="Apply a filter to load hotspots"
-            description="Pick a period, region, market, product, mode or customer above — trends, flows and the hotspot explorer load once the view is scoped."
+            icon={<LocalFireDepartmentRounded sx={{ fontSize: 44 }} />}
+            title="Nothing in scope"
+            description="No movements match the current filters. Clear one and the rankings will come back."
           />
-          <ScopePrompt />
         </Card>
       ) : (
-      <>
-      <Box sx={{ mb: 3 }}>
-        {kpis ? (
-          <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' } }}>
-            {kpis.map((m) => <KpiCard key={m.id} metric={m} />)}
-          </Box>
-        ) : <KpiSkeleton count={4} />}
-      </Box>
-
-      {/* Trends */}
-      <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, mb: 3 }}>
-        <ChartContainer
-          title={trendView === 'yoy' ? 'Year-over-year' : momYear ? `Month-over-month · ${momYear}` : 'Month-over-month'}
-          subtitle={
-            trendView === 'yoy' ? 'Total CO₂e (bars) vs intensity (line) · click a year for its months' : undefined
-          }
-          icon={<ShowChartRounded sx={{ fontSize: 18 }} />}
-          insights={trendView === 'yoy' ? (footprint ? insightsForYearOverYear(footprint.byYear) : undefined) : momRows.length ? insightsForMonthOverMonth(momRows) : undefined}
-          action={
-            <Stack direction="row" spacing={1} alignItems="center">
-              {trendView === 'mom' && momYear && (
-                <Chip size="small" color="primary" variant="outlined" label={`Months of ${momYear}`} onDelete={() => setMomYear(null)} />
-              )}
-              <ToggleButtonGroup size="small" exclusive value={trendView} onChange={(_, v) => v && setTrendView(v)} sx={{ '& .MuiToggleButton-root': { py: 0.25, px: 1.25, textTransform: 'none', fontWeight: 600 } }}>
-                <ToggleButton value="yoy">YoY</ToggleButton>
-                <ToggleButton value="mom">MoM</ToggleButton>
-              </ToggleButtonGroup>
-            </Stack>
-          }
-        >
-          {trendView === 'yoy' ? (
-            footprint ? <YearOverYearChart data={footprint.byYear} onYearClick={drillIntoYear} /> : <ChartSkeleton height={260} />
-          ) : momRows.length ? (
-            <MoMTrendChart data={momRows} />
-          ) : (
-            <ChartSkeleton height={260} />
-          )}
-        </ChartContainer>
-        <ChartContainer
-          title="Emissions by mode over time"
-          subtitle="Stacked monthly CO₂e — watch the air band"
-          icon={<LayersRounded sx={{ fontSize: 18 }} />}
-          insights={hotspots ? insightsForMonthlyByMode(hotspots.monthlyByMode) : undefined}
-        >
-          {hotspots ? <ModeTrendArea data={hotspots.monthlyByMode} /> : <ChartSkeleton height={260} />}
-        </ChartContainer>
-      </Box>
-
-      {/* Self-service explorer */}
-      <ChartContainer
-        title="Explore emissions by dimension"
-        subtitle="Pick a lens — see where CO₂e concentrates and which are least efficient (CO₂ per ton-km)"
-        icon={<TravelExploreRounded sx={{ fontSize: 18 }} />}
-        insights={hotspots ? insightsForHotspots(rows, dimensionLabel.toLowerCase()) : undefined}
-        action={
-          <TextField select size="small" label="View by" value={dimension} onChange={(e) => setDimension(e.target.value as HotspotDimension)} sx={{ width: 190 }}>
-            {DIMENSIONS.map((d) => (
-              <MenuItem key={d.key} value={d.key}>{d.label}</MenuItem>
-            ))}
-          </TextField>
-        }
-      >
-        <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', md: '1.3fr 1fr' } }}>
-          <Box>
-            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>CO₂e share</Typography>
-            {hotspots ? <TreemapChart data={rows.map((r) => ({ name: r.label, size: r.co2eTonnes, sub: `${r.shipments} shipments` }))} valueFormatter={formatTonnes} height={300} /> : <ChartSkeleton height={300} />}
-          </Box>
-          <Box>
-            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>CO₂e per tonne-km · least efficient first</Typography>
-            <Box sx={{ mt: 1.5 }}>
-              {hotspots ? (
-                <IntensityRanking
-                  items={[...rows].sort((a, b) => b.co2ePerTonneKm - a.co2ePerTonneKm).map((r) => ({ label: r.label, value: r.co2ePerTonneKm, sub: `${formatTonnes(r.co2eTonnes)} · ${r.shipments} shipments` }))}
-                  avg={footprint?.avgIntensity}
-                />
-              ) : <ChartSkeleton height={260} />}
+        <Stack spacing={3}>
+          {/* Self-service ranking — one dimension picker, both a bar list and a treemap */}
+          <ChartContainer
+            title={`CO₂e by ${dim.noun}`}
+            subtitle="Ranked highest first · switch the dimension to re-slice the same emissions"
+            icon={<LocalFireDepartmentRounded sx={{ fontSize: 18 }} />}
+            insights={insightsForHotspots(rows, dim.noun)}
+            action={
+              <TextField select size="small" label="Slice by" value={dimension} onChange={(e) => setDimension(e.target.value as HotspotDimension)} sx={{ width: 190 }}>
+                {DIMENSIONS.map((d) => (
+                  <MenuItem key={d.key} value={d.key}>
+                    {d.label}
+                  </MenuItem>
+                ))}
+              </TextField>
+            }
+          >
+            <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' } }}>
+              <BarList items={toBars(rows)} valueFormatter={formatTonnes} />
+              <TreemapChart data={toTreemap(rows)} valueFormatter={formatTonnes} height={300} />
             </Box>
+          </ChartContainer>
+
+          <Box sx={{ display: 'grid', gap: 3, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' } }}>
+            <ChartContainer
+              title="CO₂e by transport mode"
+              subtitle="Which mode carries the footprint"
+              insights={footprint ? insightsForModeSplit(footprint.modeSplit) : undefined}
+            >
+              {footprint ? <ModeSplitDonut data={footprint.modeSplit} /> : <ChartSkeleton height={260} />}
+            </ChartContainer>
+
+            <ChartContainer
+              title="Least efficient per tonne moved"
+              subtitle={`g CO₂e per tonne-kilometre by ${dim.noun}`}
+              insights={insightsForHotspots(rows, dim.noun)}
+            >
+              <IntensityRanking items={toIntensity(rows)} avg={footprint?.avgIntensity} />
+            </ChartContainer>
           </Box>
-        </Box>
-      </ChartContainer>
 
-      {/* Flow structure & seasonality */}
-      <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', lg: '1.3fr 1fr' }, mt: 3 }}>
-        <ChartContainer
-          title="Emission flows"
-          subtitle="Origin → mode → destination market · follow the CO₂e through the network"
-          icon={<AccountTreeRounded sx={{ fontSize: 18 }} />}
-          insights={hotspots ? insightsForFlows(hotspots.flows) : undefined}
-        >
-          {hotspots ? <SankeyChart flows={hotspots.flows} height={380} /> : <ChartSkeleton height={380} />}
-        </ChartContainer>
-        <ChartContainer
-          title="Seasonality heat map"
-          subtitle="CO₂e by mode × month — darker cell, heavier month"
-          icon={<GridOnRounded sx={{ fontSize: 18 }} />}
-          insights={hotspots ? insightsForSeasonality(hotspots.monthlyByMode) : undefined}
-        >
-          {hotspots ? (
-            <HeatmapChart rows={heatmap.rows} cols={heatmap.cols} values={heatmap.values} fitHeight={380} valueFormatter={(v) => formatTonnes(v, 0)} />
-          ) : (
-            <ChartSkeleton height={220} />
+          <ChartContainer
+            title="Monthly CO₂e by mode"
+            subtitle="Where the seasonal peaks fall"
+            insights={insightsForMonthlyByMode(hotspots.monthlyByMode)}
+          >
+            <ModeTrendArea data={hotspots.monthlyByMode} />
+          </ChartContainer>
+
+          <Box sx={{ display: 'grid', gap: 3, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' } }}>
+            <ChartContainer
+              title="Seasonality"
+              subtitle="Mode × month — darker is heavier"
+              insights={insightsForSeasonality(hotspots.monthlyByMode)}
+            >
+              <SeasonalityHeatmap months={hotspots.monthlyByMode} />
+            </ChartContainer>
+
+            <ChartContainer
+              title="CO₂e by destination region"
+              subtitle="Where the footprint lands"
+              insights={insightsForRegionModes(hotspots.regionModeMatrix)}
+            >
+              <BarList
+                items={hotspots.regionModeMatrix.map((r) => ({ label: r.region, value: r.total }))}
+                valueFormatter={formatTonnes}
+              />
+            </ChartContainer>
+          </Box>
+
+          <ChartContainer
+            title="Gateway → mode → region"
+            subtitle="How the CO₂e flows out of India and where it ends up"
+            insights={insightsForFlows(hotspots.flows)}
+          >
+            <SankeyChart flows={hotspots.flows} />
+          </ChartContainer>
+
+          {/* First-mile collection is inbound raw material — in the total, but not
+              something a route decision can change, so it sits on its own. */}
+          {collection.length > 0 && (
+            <ChartContainer
+              title="First-mile collection"
+              subtitle="Road runs bringing raw chilli in from the growing regions — part of the reported total, separate from the export chain"
+              insights={insightsForHotspots(collection, 'growing region')}
+            >
+              <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' } }}>
+                <BarList items={toBars(collection)} valueFormatter={formatTonnes} color="#f59e0b" />
+                <Card variant="outlined" sx={{ boxShadow: 'none' }}>
+                  <CardContent>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
+                      Why this is listed apart
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      These runs move raw chilli from the growing regions into the factory and collection stores. They belong in the
+                      reported footprint — {formatTonnes(collection.reduce((s, r) => s + r.co2eTonnes, 0))} across{' '}
+                      {collection.reduce((s, r) => s + r.shipments, 0)} monthly movements — but no gateway or sailing decision
+                      changes them, so they are kept out of the decision queue.
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Box>
+            </ChartContainer>
           )}
-        </ChartContainer>
-      </Box>
-
-      {footprint && (
-        <Box sx={{ mt: 3 }}>
-          <EquivalentsStrip tonnes={footprint.annualCo2eTonnes} title={`Annual footprint (${formatTonnes(footprint.annualCo2eTonnes)}/yr) in tangible terms`} />
-        </Box>
-      )}
-
-      {hotspots && (
-        <Stack direction="row" justifyContent="flex-end" sx={{ mt: 1 }}>
-          <Typography variant="caption" color="text.secondary">
-            Tip: combine with the filter bar above to drill into a region, market or year.
-          </Typography>
         </Stack>
       )}
-      </>
-      )}
     </Box>
+  );
+}
+
+/** Mode × month grid — HeatmapChart wants rows/cols/values, the domain has months. */
+function SeasonalityHeatmap({ months }: { months: MonthModeRow[] }) {
+  const window = months.slice(-12);
+  return (
+    <HeatmapChart
+      rows={[...MODES]}
+      cols={window.map((m) => m.period)}
+      values={MODES.map((mode) => window.map((m) => m[mode]))}
+      fitHeight={220}
+    />
   );
 }

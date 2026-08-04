@@ -1,1431 +1,1040 @@
 /**
- * Deterministic mock-data generator for Tradewind — Downstream Transportation
- * Carbon Decisioning (frontend-only POC for Terova, a global spice exporter).
+ * Data builder for Tradewind — Downstream Transportation Carbon Decisioning.
  *
- * Writes JSON into `public/mock-data/` shaped exactly like the contracts in
- * `src/types`. Heavy per-lane / per-shipment detail (legs, scenarios, calc
- * breakdown) is written as individual chunk files so it can be fetched lazily.
- * Aggregates that depend on the active persona / filters (footprint, focus KPIs)
- * are computed in the app's mappers, not here — this script emits the raw facts
- * plus the non-derivable scenario maths and a few assumptions.
+ * Reads `scripts/source/transport-downstream.json` (produced by
+ * `scripts/extract-workbook.py` from the customer's `Transport Downstream-
+ * V02.xlsx`) and writes `public/mock-data/` in the shapes declared in
+ * `src/types`.
  *
- * Methodology (from the customer's calc screenshot + the architect call):
- *   CO2e (kg) = Weight (tonnes) × Distance (km) × Emission Factor (kg/tonne-km)
- *   Distance  = great-circle × mode route factor (ocean 1.45, road 1.3, rail 1.25, air 1.05)
- *   EF is mode- and distance-tiered. Consolidated containers attribute CO2e by
- *   the shipment's weight share.
+ * The rule this file exists to enforce: **every emitted number comes from the
+ * workbook.** There is no random number generator. Weights, distances,
+ * emission factors, fuel volumes, container sizes, products, ports and CO₂e are
+ * read straight from the sheet, and each leg keeps the cell range it came from.
  *
- * Run with: `npm run mock:gen`  (or `node scripts/generate-mock-data.mjs`)
- * Output is committed so the app works with zero build steps.
+ * Three kinds of derivation are allowed, and each is labelled in the output:
+ *
+ *  1. Classification — region / market / product form / Scoville, parsed out of
+ *     the workbook's own destination and item-description text.
+ *  2. Route options — priced by re-costing a shipment through a leg chain the
+ *     workbook records for *other* shipments, using the workbook's own distance
+ *     and emission factor. An option is only offered when every leg it needs
+ *     appears in the sheet, so `timesUsedInWorkbook` is never zero.
+ *  3. To-be-planned shipments — real FY23-24 shipments rolled forward one year
+ *     to sit just after the workbook's last dispatch date. Nothing about them is
+ *     invented; `derivedFromRef` points at the row each came from.
+ *
+ * Transit days are the sole exception and are always shown as estimates: the
+ * workbook records no date beyond dispatch, so they are computed from its
+ * distances using the speeds in ASSUMPTIONS.transitEstimate. No CO₂e figure
+ * depends on them.
+ *
+ * Run with: `npm run mock:gen` (after `python3 scripts/extract-workbook.py`).
  */
 
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT = join(__dirname, '..', 'public', 'mock-data');
+const SOURCE = join(__dirname, 'source', 'transport-downstream.json');
 
-// Frozen "as of" so the generated dataset is stable & demo-friendly. The
-// historical shipment window is Jan 2022 → Dec 2024 (mirrors the customer's
-// 2020-2022 / 2021-2023 / 2022-2024 workbook tabs).
-const AS_OF = new Date('2026-06-30T00:00:00Z');
-const AS_OF_PERIOD = '2026-06';
-const BASELINE_YEAR = 2020;
-const LATEST_YEAR = 2026;
-const REDUCTION_AMBITION = 0.15; // 10–20% medium-term ambition (mid-point)
-const DAY_MS = 24 * 60 * 60 * 1000;
-const HOUR_MS = 3600 * 1000;
+const src = JSON.parse(readFileSync(SOURCE, 'utf8'));
 
-// ── Deterministic RNG (mulberry32) ─────────────────────────────────────────
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function () {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+// ── Emission factors, read back off the workbook rows ──────────────────────
+// Road is charged per truck-kilometre (so a 400 kg run costs what a 25 t run
+// does); rail, ocean and air are charged per tonne-kilometre.
+const EF = { road: 0.5928, rail: 0.00996, ocean: 0.0084, air: 1.58 };
+const EF_UNIT = { road: 'kg CO₂e / km', rail: 'kg CO₂e / tonne-km', ocean: 'kg CO₂e / tonne-km', air: 'kg CO₂e / tonne-km' };
+const EF_BASIS = { road: 'per-truck-km', rail: 'per-tonne-km', ocean: 'per-tonne-km', air: 'per-tonne-km' };
+/** Diesel burn implied by the workbook's road rows: 0.0153 kL ÷ 51 km = 0.3 L/km. */
+const ROAD_LITRES_PER_KM = 0.3;
+
+/** Transit estimates — the only figures not in the workbook. Disclosed in the UI. */
+const TRANSIT = { kmPerDay: { road: 450, rail: 400, ocean: 480, air: 3000 }, portDwellDays: 3 };
+
+// ── Geography ──────────────────────────────────────────────────────────────
+// Coordinates for every place the workbook names. Real-world locations, used
+// only to draw the map; the build throws if a workbook place is missing here.
+const GEO = {
+  'VKS Factory':    { lat: 17.4126, lon: 78.4071, kind: 'origin', country: 'India', state: 'Telangana' },
+  'VKS Hyderabad':  { lat: 17.4126, lon: 78.4071, kind: 'origin', country: 'India', state: 'Telangana' },
+  Factory:          { lat: 17.4126, lon: 78.4071, kind: 'origin', country: 'India', state: 'Telangana' },
+  'ICD Hyderabad':  { lat: 17.4569, lon: 78.438,  kind: 'icd', country: 'India', state: 'Telangana' },
+  'ICD Marripalem': { lat: 17.7286, lon: 83.253,  kind: 'icd', country: 'India', state: 'Andhra Pradesh' },
+  Hyderabad:        { lat: 17.385,  lon: 78.4867, kind: 'icd', country: 'India', state: 'Telangana' },
+  CCS:              { lat: 17.4126, lon: 78.4071, kind: 'icd', country: 'India', state: 'Telangana' },
+  'Nhava Sheva':    { lat: 18.949,  lon: 72.949,  kind: 'gateway', country: 'India', state: 'Maharashtra' },
+  Chennai:          { lat: 13.1,    lon: 80.3,    kind: 'gateway', country: 'India', state: 'Tamil Nadu' },
+  'New York':       { lat: 40.67,   lon: -74.04,  kind: 'dest', country: 'United States', region: 'Americas' },
+  Antwerp:          { lat: 51.26,   lon: 4.4,     kind: 'dest', country: 'Belgium', region: 'Europe' },
+  Felixstowe:       { lat: 51.95,   lon: 1.32,    kind: 'dest', country: 'United Kingdom', region: 'Europe' },
+  'Laem Chabang':   { lat: 13.08,   lon: 100.89,  kind: 'dest', country: 'Thailand', region: 'APAC' },
+  Tokyo:            { lat: 35.62,   lon: 139.78,  kind: 'dest', country: 'Japan', region: 'APAC' },
+  Konan:            { lat: 35.09,   lon: 136.88,  kind: 'dest', country: 'Japan', region: 'APAC' },
+  Guangzhou:        { lat: 23.1,    lon: 113.25,  kind: 'dest', country: 'China', region: 'APAC' },
+  Ballary:          { lat: 15.1394, lon: 76.9214, kind: 'growing-region', country: 'India', state: 'Karnataka' },
+  Vatsavai:         { lat: 16.73,   lon: 80.49,   kind: 'growing-region', country: 'India', state: 'Andhra Pradesh' },
+  Khammam:          { lat: 17.2473, lon: 80.1514, kind: 'growing-region', country: 'India', state: 'Telangana' },
+  Warangal:         { lat: 17.9689, lon: 79.5941, kind: 'growing-region', country: 'India', state: 'Telangana' },
+  Karnataka:        { lat: 15.3173, lon: 75.7139, kind: 'growing-region', country: 'India', state: 'Karnataka' },
+};
+
+/** Destination country, from the workbook's own port names. */
+const DEST_MARKET = {
+  'New York': 'United States', Antwerp: 'Belgium', Felixstowe: 'United Kingdom',
+  'Laem Chabang': 'Thailand', Tokyo: 'Japan', Konan: 'Japan', Guangzhou: 'China',
+};
+
+// ── Small helpers ──────────────────────────────────────────────────────────
+const r3 = (n) => Math.round(n * 1000) / 1000;
+const r4 = (n) => Math.round(n * 10000) / 10000;
+const r6 = (n) => Math.round(n * 1e6) / 1e6;
+const sum = (arr, f) => arr.reduce((a, b) => a + f(b), 0);
+const uniq = (arr) => [...new Set(arr)];
+const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+const byDesc = (f) => (a, b) => f(b) - f(a);
+const nf = (n) => Math.round(n).toLocaleString('en-US');
+
+/**
+ * CO₂e for prose. Most shipments here sit well below a tonne, so anything under
+ * one is written in kilograms — "34 kg" instead of "0.03 t", which reads as
+ * nothing. Mirrors `formatTonnes` in src/utils/format.ts.
+ */
+const co2e = (t) => {
+  const abs = Math.abs(t);
+  if (abs >= 100) return `${nf(t)} t`;
+  if (abs >= 10) return `${t.toFixed(1)} t`;
+  if (abs >= 1) return `${t.toFixed(2)} t`;
+  if (abs === 0) return '0 kg';
+  if (abs >= 0.001) return `${nf(t * 1000)} kg`;
+  return `${(t * 1000).toFixed(2)} kg`;
+};
+/** Load weight for prose — kilograms below a tonne. */
+const wt = (t) => (Math.abs(t) >= 1 ? `${t.toFixed(1)} t` : `${nf(t * 1000)} kg`);
+
+/** Most frequent value first, ties broken alphabetically so output is stable. */
+function rank(values) {
+  const c = new Map();
+  for (const v of values) c.set(v, (c.get(v) ?? 0) + 1);
+  return [...c.entries()].sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0]))).map(([v]) => v);
 }
-const rng = mulberry32(20250108);
-const rand = (min, max) => min + (max - min) * rng();
-const randInt = (min, max) => Math.floor(rand(min, max + 1));
-const pick = (arr) => arr[Math.floor(rng() * arr.length)];
-const pickWeighted = (entries) => {
-  const total = entries.reduce((a, [, w]) => a + w, 0);
-  let r = rng() * total;
-  for (const [v, w] of entries) if ((r -= w) <= 0) return v;
-  return entries[entries.length - 1][0];
-};
-const round = (n, dp = 0) => {
-  const f = 10 ** dp;
-  return Math.round(n * f) / f;
-};
-const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
-const tsHoursAgo = (h) => new Date(AS_OF.getTime() - Math.round(h * HOUR_MS)).toISOString();
-const tsDaysAgo = (d) => new Date(AS_OF.getTime() - Math.round(d * DAY_MS)).toISOString();
-const AS_OF_ISO = AS_OF.toISOString().slice(0, 10); // '2026-06-30' (frozen "today")
-const addDays = (iso, n) => {
+function addDays(iso, n) {
   const d = new Date(`${iso}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
-};
-
-// ── Geography (real coordinates from the customer's Route_Dictionary) ────────
-// kind: origin (inland processing) | port (sea gateway) | dest (destination market)
-const GEO = {
-  // Indian inland processing origins
-  Vatsavai: { lat: 16.983, lon: 80.25, kind: 'origin', country: 'India', state: 'Andhra Pradesh' },
-  Ballari: { lat: 15.1394, lon: 76.9214, kind: 'origin', country: 'India', state: 'Karnataka' },
-  Hyderabad: { lat: 17.385, lon: 78.4867, kind: 'origin', country: 'India', state: 'Telangana' },
-  Khammam: { lat: 17.2473, lon: 80.1514, kind: 'origin', country: 'India', state: 'Telangana' },
-  Warangal: { lat: 17.9689, lon: 79.5941, kind: 'origin', country: 'India', state: 'Telangana' },
-  Guntur: { lat: 16.3067, lon: 80.4365, kind: 'origin', country: 'India', state: 'Andhra Pradesh' },
-  // Indian sea gateways (origin ports)
-  'Nhava Sheva': { lat: 18.949, lon: 72.952, kind: 'port', country: 'India', state: 'Maharashtra', portCode: 'INNSA' },
-  Chennai: { lat: 13.0827, lon: 80.2707, kind: 'port', country: 'India', state: 'Tamil Nadu', portCode: 'INMAA' },
-  Visakhapatnam: { lat: 17.747, lon: 83.239, kind: 'port', country: 'India', state: 'Andhra Pradesh', portCode: 'INVTZ' },
-  Mundra: { lat: 22.839, lon: 69.728, kind: 'port', country: 'India', state: 'Gujarat', portCode: 'INMUN' },
-  // Destination ports / markets
-  'New York': { lat: 40.7128, lon: -74.006, kind: 'dest', country: 'USA', region: 'Americas', portCode: 'USNYC' },
-  Savannah: { lat: 32.0809, lon: -81.0912, kind: 'dest', country: 'USA', region: 'Americas', portCode: 'USSAV' },
-  'Los Angeles': { lat: 33.7544, lon: -118.2165, kind: 'dest', country: 'USA', region: 'Americas', portCode: 'USLAX' },
-  Houston: { lat: 29.7604, lon: -95.3698, kind: 'dest', country: 'USA', region: 'Americas', portCode: 'USHOU' },
-  Santos: { lat: -23.9608, lon: -46.3336, kind: 'dest', country: 'Brazil', region: 'Americas', portCode: 'BRSSZ' },
-  Antwerp: { lat: 51.2194, lon: 4.4025, kind: 'dest', country: 'Belgium', region: 'Europe', portCode: 'BEANR' },
-  Rotterdam: { lat: 51.9244, lon: 4.4777, kind: 'dest', country: 'Netherlands', region: 'Europe', portCode: 'NLRTM' },
-  Felixstowe: { lat: 51.967, lon: 1.352, kind: 'dest', country: 'United Kingdom', region: 'Europe', portCode: 'GBFXT' },
-  Hamburg: { lat: 53.5511, lon: 9.9937, kind: 'dest', country: 'Germany', region: 'Europe', portCode: 'DEHAM' },
-  Genoa: { lat: 44.4056, lon: 8.9463, kind: 'dest', country: 'Italy', region: 'Europe', portCode: 'ITGOA' },
-  'Jebel Ali': { lat: 25.0118, lon: 55.1336, kind: 'dest', country: 'UAE', region: 'Middle East', portCode: 'AEJEA' },
-  'Laem Chabang': { lat: 13.0836, lon: 100.8844, kind: 'dest', country: 'Thailand', region: 'APAC', portCode: 'THLCH' },
-  Guangzhou: { lat: 23.1291, lon: 113.2644, kind: 'dest', country: 'China', region: 'APAC', portCode: 'CNCAN' },
-  Shanghai: { lat: 31.2304, lon: 121.4737, kind: 'dest', country: 'China', region: 'APAC', portCode: 'CNSHA' },
-  Singapore: { lat: 1.3521, lon: 103.8198, kind: 'dest', country: 'Singapore', region: 'APAC', portCode: 'SGSIN' },
-  Tokyo: { lat: 35.6762, lon: 139.6503, kind: 'dest', country: 'Japan', region: 'APAC', portCode: 'JPTYO' },
-  Busan: { lat: 35.1796, lon: 129.0756, kind: 'dest', country: 'South Korea', region: 'APAC', portCode: 'KRPUS' },
-  Sydney: { lat: -33.8688, lon: 151.2093, kind: 'dest', country: 'Australia', region: 'APAC', portCode: 'AUSYD' },
-};
-
-// Final inland delivery city near each destination port (for the dest road leg).
-const DEST_HINTERLAND = {
-  'New York': { city: 'Edison, NJ', lat: 40.5187, lon: -74.4121 },
-  Savannah: { city: 'Atlanta, GA', lat: 33.749, lon: -84.388 },
-  'Los Angeles': { city: 'Ontario, CA', lat: 34.0633, lon: -117.6509 },
-  Houston: { city: 'Dallas, TX', lat: 32.7767, lon: -96.797 },
-  Santos: { city: 'São Paulo', lat: -23.5558, lon: -46.6396 },
-  Antwerp: { city: 'Brussels', lat: 50.8503, lon: 4.3517 },
-  Rotterdam: { city: 'Utrecht', lat: 52.0907, lon: 5.1214 },
-  Felixstowe: { city: 'London', lat: 51.5072, lon: -0.1276 },
-  Hamburg: { city: 'Hanover', lat: 52.3759, lon: 9.732 },
-  Genoa: { city: 'Milan', lat: 45.4642, lon: 9.19 },
-  'Jebel Ali': { city: 'Dubai', lat: 25.2048, lon: 55.2708 },
-  'Laem Chabang': { city: 'Bangkok', lat: 13.7563, lon: 100.5018 },
-  Guangzhou: { city: 'Foshan', lat: 23.0215, lon: 113.1214 },
-  Shanghai: { city: 'Suzhou', lat: 31.2989, lon: 120.5853 },
-  Singapore: { city: 'Jurong', lat: 1.3329, lon: 103.7436 },
-  Tokyo: { city: 'Yokohama', lat: 35.4437, lon: 139.638 },
-  Busan: { city: 'Daegu', lat: 35.8714, lon: 128.6014 },
-  Sydney: { city: 'Parramatta', lat: -33.815, lon: 151.0 },
-};
-
-// ── Distance & emissions maths ──────────────────────────────────────────────
-const R_EARTH = 6371;
-const toRad = (d) => (d * Math.PI) / 180;
-function haversineKm(a, b) {
-  const dLat = toRad(b.lat - a.lat);
-  const dLon = toRad(b.lon - a.lon);
-  const s =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLon / 2) ** 2;
-  const c = 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
-  return R_EARTH * c;
-}
-/**
- * Mode-specific route deviation factors over great-circle distance.
- * Ocean reflects port-to-port shipping networks (e.g. Suez transits ≫ straight
- * line); road/rail reflect network wind; air flies near-direct.
- */
-const DEVIATION = { ocean: 1.45, road: 1.3, rail: 1.25, air: 1.05 };
-const distanceKm = (a, b, mode = 'road') => round(haversineKm(a, b) * (DEVIATION[mode] ?? 1.3), 1);
-
-/**
- * Emission factor in kg CO2e per tonne-km, mode- and distance-tiered.
- * - Air uses the customer's screenshot tiers (2.136 / 1.323 / 1.191).
- * - Ocean/rail/road use defensible global container/rail/full-truck factors so
- *   the cross-mode comparison (CO2e per tonne-km) tells the right story:
- *   air ≫ road > rail > ocean. All factors are surfaced in the methodology page.
- */
-function efPerTonneKm(mode, km) {
-  switch (mode) {
-    case 'air':
-      return km < 1000 ? 2.136 : km <= 3700 ? 1.323 : 1.191;
-    case 'ocean':
-      return km < 1000 ? 0.016 : km <= 3700 ? 0.012 : 0.008;
-    case 'rail':
-      return 0.028;
-    case 'road':
-    default:
-      return 0.088; // full-load diesel truck, tonne-km basis
-  }
-}
-const distanceTier = (km) => (km < 1000 ? '< 1000 km' : km <= 3700 ? '1000–3700 km' : '> 3700 km');
-
-/** CO2e for a single leg, in tonnes. weightTonnes already = attributed share. */
-function legCo2eTonnes(mode, km, weightTonnes) {
-  return (weightTonnes * km * efPerTonneKm(mode, km)) / 1000;
 }
 
-// Rough transit days per mode (incl. port/handling buffers).
-function legDays(mode, km) {
-  switch (mode) {
-    case 'air':
-      return round(km / 9000 + 1.5, 1);
-    case 'ocean':
-      return round(km / 650 + 4, 1); // ~650 km/day + port dwell
-    case 'rail':
-      return round(km / 550 + 1, 1);
-    case 'road':
-    default:
-      return round(km / 600 + 0.5, 1);
-  }
+// ── Product classification, parsed from the workbook's item descriptions ───
+function classifyProduct(itemRaw) {
+  const item = String(itemRaw).replace(/\s+/g, ' ').trim();
+  const U = item.toUpperCase();
+
+  const form = /CRUSH|MINCED/.test(U) ? 'Crushed'
+    : /GRND|GROUND|GRD|POWDER/.test(U) ? 'Ground'
+      : 'Whole';
+
+  const base = /CAPSICUM/.test(U) ? 'Capsicum'
+    : /CUMIN/.test(U) ? 'Cumin'
+      : /PEPPER/.test(U) ? 'Red Pepper'
+        : 'Chilli';
+
+  // Scoville, written as "35000 SHU", "25,000 SHU", "35K-40K SHU", "60-000 SCU",
+  // "10-20K" or "35-40 K". Ranges take the midpoint.
+  let shu = null;
+  const bandK = U.match(/(\d{1,3})\s*K?\s*[-–]\s*(\d{1,3})\s*K/);
+  const flat = U.match(/(\d{1,3}[,\s-]\d{3}|\d{4,6})\s*(?:SHU|SCU)/);
+  const soloK = U.match(/(\d{1,3})\s*K\s*(?:SHU|SCU)/);
+  if (bandK) shu = ((Number(bandK[1]) + Number(bandK[2])) / 2) * 1000;
+  else if (flat) shu = Number(flat[1].replace(/[,\s-]/g, ''));
+  else if (soloK) shu = Number(soloK[1]) * 1000;
+  if (shu !== null && (shu < 500 || shu > 200000)) shu = null;
+
+  return {
+    productName: item,
+    productForm: form,
+    category: `${base} · ${form}`,
+    shu,
+    productSku: `SKU-${slug(item).slice(0, 34).toUpperCase()}`,
+  };
 }
 
-// Rough freight cost (USD) per leg — ocean cheapest/tonne, air ~12× ocean.
-function legCostUsd(mode, km, weightTonnes) {
-  const perTkm = mode === 'air' ? 0.62 : mode === 'road' ? 0.14 : mode === 'rail' ? 0.06 : 0.022;
-  const base = mode === 'ocean' ? 240 : mode === 'air' ? 180 : 40;
-  return Math.round(base + weightTonnes * km * perTkm);
+function place(name) {
+  const g = GEO[name];
+  if (!g) throw new Error(`No coordinates for workbook place "${name}" — add it to GEO in generate-mock-data.mjs`);
+  return g;
+}
+const coord = (name) => ({ lat: place(name).lat, lon: place(name).lon });
+
+function transitDays(mode, km) {
+  const base = km / TRANSIT.kmPerDay[mode];
+  return mode === 'ocean' || mode === 'air' ? base + TRANSIT.portDwellDays : base;
 }
 
-// Fuel consumed/projected per leg — litres, attributed by weight share.
-// Litres per tonne-km by mode (illustrative; ships are efficient per t-km, air burns the most).
-const FUEL_RATE = { road: 0.022, rail: 0.005, ocean: 0.0025, air: 0.2 };
-const FUEL_TYPE = { road: 'Diesel', rail: 'Diesel', ocean: 'Marine fuel oil', air: 'Jet A-1' };
-function legFuelLitres(mode, km, weightTonnes) {
-  return weightTonnes * km * (FUEL_RATE[mode] ?? 0.02);
-}
+/** Which mode an inland row belongs to — told by its own emission factor. */
+const modeOfInlandRow = (row) => (row.ef === EF.rail ? 'rail' : 'road');
 
-// Per-vehicle payload capacity (tonnes) → how many vehicles fill one shipment leg.
-const VEHICLE_CAPACITY = { road: 12, rail: 55, ocean: 26, air: 90 };
-function legVehicleCount(mode, weightTonnes) {
-  return Math.max(1, Math.ceil(weightTonnes / (VEHICLE_CAPACITY[mode] ?? 20)));
-}
-
-const MODE_LABEL = { road: 'Road', rail: 'Rail', ocean: 'Ocean', air: 'Air' };
-
-// ── Domain pools ────────────────────────────────────────────────────────────
-// Spice product catalogue (categories, families, SHU heat) — Terova's exports.
-const PRODUCTS = [
-  { sku: 'CHL-RC-30', name: 'Chilli Red Crushed (3/16", 30K SHU)', category: 'Chilli & Cayenne', family: 'Crushed Chilli', shu: 30000 },
-  { sku: 'CHL-RG-35', name: 'Red Pepper Ground (35K–40K SHU)', category: 'Chilli & Cayenne', family: 'Ground Chilli', shu: 38000 },
-  { sku: 'CHL-RG-40', name: 'Red Pepper Ground (40K–50K SHU)', category: 'Chilli & Cayenne', family: 'Ground Chilli', shu: 45000 },
-  { sku: 'CHL-CY-ST', name: 'Cayenne Ground, Steam-Treated', category: 'Chilli & Cayenne', family: 'Cayenne', shu: 50000 },
-  { sku: 'CHL-RC-MC', name: 'Chilli Red Crushed, Micro Steam', category: 'Chilli & Cayenne', family: 'Crushed Chilli', shu: 32000 },
-  { sku: 'PAP-SW-LO', name: 'Sweet Paprika Ground (low SHU)', category: 'Paprika', family: 'Paprika', shu: 500 },
-  { sku: 'PAP-SM-MD', name: 'Smoked Paprika Ground', category: 'Paprika', family: 'Paprika', shu: 800 },
-  { sku: 'TUR-GR-CU', name: 'Turmeric Ground, Curcumin 3%', category: 'Turmeric', family: 'Turmeric', shu: 0 },
-  { sku: 'CUM-GR-ST', name: 'Cumin Ground, Steam-Sterilised', category: 'Cumin & Coriander', family: 'Cumin', shu: 0 },
-  { sku: 'COR-GR-ST', name: 'Coriander Ground, Steam-Sterilised', category: 'Cumin & Coriander', family: 'Coriander', shu: 0 },
-  { sku: 'PEP-BL-TE', name: 'Black Pepper, Tellicherry Whole', category: 'Pepper', family: 'Black Pepper', shu: 0 },
-  { sku: 'GIN-GR-DR', name: 'Ginger Ground, Dried', category: 'Ginger', family: 'Ginger', shu: 0 },
-  { sku: 'BLN-CY-SE', name: 'Curry Seasoning Blend', category: 'Blends', family: 'Blends', shu: 8000 },
-];
-
-// Customers (importers) by destination market → default destination port.
-const CUSTOMERS = [
-  { name: 'Atlantic Spice Imports', group: 'Atlantic Foods', region: 'Americas', port: 'New York' },
-  { name: 'Gulf Coast Seasonings', group: 'Gulf Foods Inc', region: 'Americas', port: 'Houston' },
-  { name: 'Pacific Flavor Co', group: 'Pacific Pantry', region: 'Americas', port: 'Los Angeles' },
-  { name: 'Savannah Spice Traders', group: 'Atlantic Foods', region: 'Americas', port: 'Savannah' },
-  { name: 'Andes Sabores', group: 'LatAm Foods', region: 'Americas', port: 'Santos' },
-  { name: 'Antwerp Spice Group', group: 'Benelux Flavours', region: 'Europe', port: 'Antwerp' },
-  { name: 'Rhineland Seasonings', group: 'Rhein Foods AG', region: 'Europe', port: 'Hamburg' },
-  { name: 'Britannia Spice Ltd', group: 'Albion Foods', region: 'Europe', port: 'Felixstowe' },
-  { name: 'Mediterraneo Spezie', group: 'Sud Foods SpA', region: 'Europe', port: 'Genoa' },
-  { name: 'Rotterdam Flavour BV', group: 'Benelux Flavours', region: 'Europe', port: 'Rotterdam' },
-  { name: 'Levant Spice Trading', group: 'Gulf Pantry', region: 'Middle East', port: 'Jebel Ali' },
-  { name: 'Guangzhou Spice Trading', group: 'Pearl River Foods', region: 'APAC', port: 'Guangzhou' },
-  { name: 'Nippon Flavour KK', group: 'Sakura Foods', region: 'APAC', port: 'Tokyo' },
-  { name: 'Siam Spice Imports', group: 'Mekong Foods', region: 'APAC', port: 'Laem Chabang' },
-  { name: 'Lion City Seasonings', group: 'Straits Pantry', region: 'APAC', port: 'Singapore' },
-  { name: 'Shanghai Taste Co', group: 'Pearl River Foods', region: 'APAC', port: 'Shanghai' },
-  { name: 'Hanseatic Spice', group: 'Rhein Foods AG', region: 'Europe', port: 'Rotterdam' },
-  { name: 'Southern Cross Foods', group: 'Pacifica Pantry', region: 'APAC', port: 'Sydney' },
-];
-
-// Vendors / processors — Terova's outsourced processing & origin handoff.
-const VENDORS = [
-  { name: 'Vatsavai Processing Unit', origin: 'Vatsavai', controllability: 'Medium' },
-  { name: 'Ballari Agro Processors', origin: 'Ballari', controllability: 'Medium' },
-  { name: 'VKS Spice Mills, Hyderabad', origin: 'Hyderabad', controllability: 'High' },
-  { name: 'Khammam Cold Chain', origin: 'Khammam', controllability: 'Low' },
-  { name: 'Warangal Grinding Co', origin: 'Warangal', controllability: 'Medium' },
-  { name: 'Guntur Chilli Yards', origin: 'Guntur', controllability: 'Low' },
-];
-
-// Logistics service providers (freight forwarders + ocean carriers) with a
-// relative CO2e-intensity index (1.0 = fleet average; <1 greener fleet).
-const LSPS = [
-  { name: 'Oceanic Freight Solutions', carrier: 'SeaLink Lines', intensityIndex: 0.88, greenProgram: true },
-  { name: 'BlueRoute Logistics', carrier: 'EverBlue Container Line', intensityIndex: 0.94, greenProgram: true },
-  { name: 'Meridian Forwarders', carrier: 'Pacific Star Shipping', intensityIndex: 1.06, greenProgram: false },
-  { name: 'TransGlobe Logistics', carrier: 'OrientGulf Carrier', intensityIndex: 1.13, greenProgram: false },
-  { name: 'Continental Cargo Partners', carrier: 'SeaLink Lines', intensityIndex: 1.0, greenProgram: false },
-];
-
-// Origin port selection by destination region (which Indian gateway is used).
-// Mainland-coast gateways only — Mundra sits inside the Gulf of Kachchh, so a
-// straight inland road leg to it would skim the sea; excluded so road/rail legs
-// stay over land.
-const PORT_BY_REGION = {
-  Americas: ['Nhava Sheva', 'Chennai'],
-  Europe: ['Nhava Sheva'],
-  'Middle East': ['Nhava Sheva'],
-  APAC: ['Chennai', 'Visakhapatnam', 'Nhava Sheva'],
-};
-// The nearest/greener gateway we'd recommend per origin (cuts inland km).
-const NEAREST_PORT_BY_ORIGIN = {
-  Vatsavai: 'Visakhapatnam',
-  Guntur: 'Visakhapatnam',
-  Khammam: 'Visakhapatnam',
-  Warangal: 'Visakhapatnam',
-  Hyderabad: 'Chennai',
-  Ballari: 'Chennai',
-};
-
-const MONTHS = [];
-for (let y = BASELINE_YEAR; y <= LATEST_YEAR; y++)
-  for (let m = 1; m <= 12; m++) {
-    const p = `${y}-${String(m).padStart(2, '0')}`;
-    if (p <= AS_OF_PERIOD) MONTHS.push(p); // no future months beyond "today"
-  }
-
-// Reduction program ramp: realized % reduction applied to a lane in a month.
-// Pilot starts 2023-07; ramps from ~2% toward ~9% by mid-2026 — mid-journey
-// against the 10–20% ambition, so the target still has road left to run.
-function realizedReductionPct(period) {
-  const [y, m] = period.split('-').map(Number);
-  const idx = (y - BASELINE_YEAR) * 12 + (m - 1);
-  const pilotStart = (2023 - BASELINE_YEAR) * 12 + 6; // 2023-07
-  if (idx < pilotStart) return 0;
-  const ramp = (idx - pilotStart) / 35; // → 1.0 by 2026-06
-  return clamp(0.02 + ramp * 0.07, 0, 0.09);
-}
-
-// Live status from the shipment's ship date + ETA relative to "today".
-// Future ship date → Planned (scheduled); shipped-but-not-arrived → In transit.
-function statusForDates(date, eta) {
-  if (date > AS_OF_ISO) return 'Planned';
-  if (eta > AS_OF_ISO) return 'In transit';
-  return 'Delivered';
-}
-
-// ── Leg + scenario construction ─────────────────────────────────────────────
-function makeLeg(seq, mode, fromName, toName, weightTonnes, opts = {}) {
-  const from = opts.from ?? GEO[fromName];
-  const to = opts.to ?? GEO[toName];
-  const km = opts.km ?? distanceKm(from, to, mode);
-  const ef = efPerTonneKm(mode, km);
-  const co2e = legCo2eTonnes(mode, km, weightTonnes);
+/** Turn one workbook row (or a re-costed catalogue leg) into a Leg. */
+function makeLeg(row, mode, seq, weightTonnes) {
+  const km = row.distanceKm;
   return {
     seq,
     mode,
-    modeLabel: MODE_LABEL[mode],
-    from: fromName,
-    to: toName,
-    fromCoord: { lat: from.lat, lon: from.lon },
-    toCoord: { lat: to.lat, lon: to.lon },
-    distanceKm: round(km, 1),
-    distanceSource: opts.distanceSource ?? `Great-circle × ${DEVIATION[mode] ?? 1.3} (${mode} route factor)`,
-    distanceTier: distanceTier(km),
-    emissionFactor: ef,
-    efUnit: 'kg CO₂e / tonne-km',
-    vehicleType: opts.vehicleType ?? (mode === 'road' ? 'Full-load diesel truck' : mode === 'ocean' ? 'Container vessel' : mode === 'rail' ? 'Freight rail' : 'Air freighter'),
-    weightTonnes: round(weightTonnes, 3),
-    co2eTonnes: round(co2e, 3),
-    fuelLitres: round(legFuelLitres(mode, km, weightTonnes), 1),
-    fuelType: FUEL_TYPE[mode] ?? 'Diesel',
-    vehicleCount: legVehicleCount(mode, weightTonnes),
-    transitDaysExpected: legDays(mode, km),
-    transitDaysActual: round(legDays(mode, km) * rand(1.0, 1.18), 1),
+    modeLabel: mode[0].toUpperCase() + mode.slice(1),
+    from: row.source,
+    to: row.dest,
+    fromCoord: coord(row.source),
+    toCoord: coord(row.dest),
+    distanceKm: r3(km),
+    distanceNm: row.distanceNm ?? null,
+    emissionFactor: row.ef,
+    efUnit: EF_UNIT[mode],
+    efBasis: EF_BASIS[mode],
+    weightTonnes: r4(weightTonnes),
+    co2eTonnes: r6(row.co2e),
+    fuelLitres: mode === 'road'
+      ? Math.round(row.fuelKl != null ? row.fuelKl * 1000 : km * ROAD_LITRES_PER_KM)
+      : null,
+    fuelType: row.fuelType ?? (mode === 'road' ? 'Diesel' : null),
+    transitDaysEst: r3(transitDays(mode, km)),
+    sourceRef: row.sourceRef,
   };
 }
 
-function sumCo2e(legs) {
-  return round(legs.reduce((s, l) => s + l.co2eTonnes, 0), 3);
+// ══════════════════════════════════════════════════════════════════════════
+// 1. Leg catalogue — what routings the workbook actually evidences
+// ══════════════════════════════════════════════════════════════════════════
+
+const inlandCatalogue = new Map(); // "src→dst|km|mode" -> leg + count + refs
+const oceanCatalogue = new Map(); // "gateway→dest|km"  -> leg + count + refs
+const airCatalogue = new Map();
+
+function catalogue(map, key, seed) {
+  const hit = map.get(key);
+  if (hit) {
+    hit.count += 1;
+    if (hit.refs.length < 4) hit.refs.push(seed.ref);
+    return hit;
+  }
+  map.set(key, { ...seed, count: 1, refs: [seed.ref] });
+  return map.get(key);
 }
-function sumDays(legs) {
-  return round(legs.reduce((s, l) => s + legDays(l.mode, l.distanceKm), 0), 1);
-}
-function sumCost(legs) {
-  return Math.round(legs.reduce((s, l) => s + legCostUsd(l.mode, l.distanceKm, l.weightTonnes), 0));
+
+const inlandKey = (l) => `${l.source}→${l.dest}|${l.distanceKm}|${modeOfInlandRow(l)}`;
+
+for (const year of src.years) {
+  for (const sh of year.exportShipments) {
+    for (const leg of sh.inland) {
+      catalogue(inlandCatalogue, inlandKey(leg), {
+        source: leg.source, dest: leg.dest, distanceKm: leg.distanceKm, mode: modeOfInlandRow(leg),
+        ef: leg.ef, fuelKl: leg.fuelKl ?? null, fuelType: leg.fuelType ?? null, ref: leg.sourceRef,
+      });
+    }
+    const o = sh.ocean;
+    catalogue(oceanCatalogue, `${o.source}→${o.dest}|${o.distanceKm}`, {
+      source: o.source, dest: o.dest, distanceKm: o.distanceKm, distanceNm: o.distanceNm ?? null,
+      ef: o.ef, ref: o.sourceRef,
+    });
+  }
+  for (const sh of year.airShipments) {
+    const a = sh.air;
+    catalogue(airCatalogue, `${a.source}→${a.dest}|${a.distanceKm}`, {
+      source: a.source, dest: a.dest, distanceKm: a.distanceKm, ef: a.ef, ref: a.sourceRef,
+    });
+  }
 }
 
 /**
- * Build the four decisioning scenarios for a lane flow. `base` carries the
- * current path facts; transforms encode the route_mode_decision.png playbook:
- *  - Optimal   = multimodal / air-heavy, fastest, highest CO2 (urgent SLA fit)
- *  - Balanced  = road+ocean optimized, 2–3 weeks, balanced CO2 (pragmatic)
- *  - Best-CO2  = ocean-heavy + rail inland + consolidation, slowest, lowest CO2
- *  - Current   = as-shipped
+ * Inland routings to each gateway, taken from the FY23-24 tab only — the latest
+ * reporting year, the one whose leg totals reconcile to the workbook's own
+ * printed total to the last decimal, and the only tab whose depot labels are
+ * internally consistent. Earlier tabs record the same run as both
+ * "Hyderabad, 21 km" and "Hyderabad, 645 km", so they cannot define an option.
  */
-function buildScenarios(base) {
-  const { origin, originPort, destPort, destCity, destCoord, weightTonnes, inlandMode, isAir } = base;
-  const W = weightTonnes;
-
-  // ----- CURRENT -----
-  let current;
-  if (isAir) {
-    current = [makeLeg(1, 'air', origin, destCity, W, { to: destCoord })];
-  } else {
-    current = [
-      makeLeg(1, inlandMode, origin, originPort, W),
-      makeLeg(2, 'ocean', originPort, destPort, W),
-      makeLeg(3, 'road', destPort, destCity, W, { to: destCoord }),
-    ];
+const INLAND_ROUTINGS = (() => {
+  const fy = src.years.find((y) => y.reportingYear === 'FY23-24');
+  const byGateway = new Map();
+  for (const sh of fy.exportShipments) {
+    if (!sh.inland.length) continue;
+    const gw = sh.ocean.source;
+    const chain = sh.inland.map(inlandKey);
+    const bucket = byGateway.get(gw) ?? new Map();
+    const key = chain.join(' + ');
+    const hit = bucket.get(key) ?? { gateway: gw, chain, count: 0 };
+    hit.count += 1;
+    bucket.set(key, hit);
+    byGateway.set(gw, bucket);
   }
+  return new Map([...byGateway].map(([gw, b]) => [gw, [...b.values()].sort(byDesc((r) => r.count))]));
+})();
 
-  // ----- BEST FOR CO2 -----  ocean-heavy, rail inland, nearest port, consolidation
-  const nearer = NEAREST_PORT_BY_ORIGIN[origin] ?? originPort;
-  const bestLegs = [
-    makeLeg(1, 'rail', origin, nearer, W),
-    makeLeg(2, 'ocean', nearer, destPort, W),
-    makeLeg(3, 'rail', destPort, destCity, W, { to: destCoord, km: distanceKm(GEO[destPort], destCoord, 'rail') }),
-  ];
-  // Consolidation + slow-steaming efficiency: trim ocean leg CO2e ~6%.
-  bestLegs[1].co2eTonnes = round(bestLegs[1].co2eTonnes * 0.94, 3);
-
-  // ----- BALANCED -----  road+ocean, optimized port pairing, partial rail
-  const balancedLegs = [
-    makeLeg(1, 'rail', origin, originPort, W),
-    makeLeg(2, 'ocean', originPort, destPort, W),
-    makeLeg(3, 'road', destPort, destCity, W, { to: destCoord, km: distanceKm(GEO[destPort], destCoord, 'road') * 0.9 }),
-  ];
-
-  // ----- OPTIMAL -----  multimodal/air-heavy: fastest, highest CO2
-  const optimalLegs = [
-    makeLeg(1, 'road', origin, originPort, W),
-    makeLeg(2, 'air', originPort, destPort, W),
-    makeLeg(3, 'road', destPort, destCity, W, { to: destCoord, km: distanceKm(GEO[destPort], destCoord, 'road') }),
-  ];
-
-  const mk = (kind, legs, opts) => {
-    const co2e = sumCo2e(legs);
-    return {
-      kind,
-      label: opts.label,
-      legs,
-      modePath: legs.map((l) => l.modeLabel),
-      co2eTonnes: co2e,
-      transitDays: round(sumDays(legs) + opts.dwell, 1),
-      freightUsd: Math.round(sumCost(legs) * opts.costMult),
-      tagline: opts.tagline,
-      transitBand: opts.transitBand,
-      slaRisk: opts.slaRisk,
-      feasibility: opts.feasibility,
-      narrative: opts.narrative,
-    };
-  };
-
-  const cur = mk('current', current, {
-    label: 'Current (as shipped)',
-    dwell: isAir ? 1 : 6,
-    costMult: 1,
-    tagline: isAir ? 'Air freight — fast but carbon-heavy' : 'Road inland + ocean + road delivery',
-    transitBand: isAir ? '3–5 days' : '3–4 weeks',
-    slaRisk: 'Baseline',
-    feasibility: 'In place',
-    narrative: isAir
-      ? 'Shipped by air — an exception path with the highest CO₂e per tonne-km.'
-      : 'The lane as currently executed by the vendor/LSP.',
+/** Re-cost an inland routing for a weight, using the catalogue's own numbers. */
+function costInlandRouting(routing, weightTonnes, seqStart = 1) {
+  return routing.chain.map((key, i) => {
+    const leg = inlandCatalogue.get(key);
+    if (!leg) throw new Error(`Inland leg ${key} missing from catalogue`);
+    const co2e = leg.mode === 'road'
+      ? (leg.distanceKm * leg.ef) / 1000
+      : (weightTonnes * leg.distanceKm * leg.ef) / 1000;
+    return makeLeg({ ...leg, co2e, sourceRef: leg.refs[0] }, leg.mode, seqStart + i, weightTonnes);
   });
-  const optimal = mk('optimal', optimalLegs, {
-    label: 'Fastest',
-    dwell: 1,
-    costMult: 1.0,
-    tagline: 'Multimodal / air-heavy — fastest, but highest CO₂ & cost',
-    transitBand: '3–5 days',
-    slaRisk: 'Lowest',
-    feasibility: 'For urgent / replenishment only',
-    narrative: 'Air on the long leg for urgent SLAs. Best transit, but the highest emissions — govern as an exception.',
-  });
-  const balanced = mk('balanced', balancedLegs, {
-    label: 'Balanced',
-    dwell: 5,
-    // Rail-to-port + optimized delivery is roughly cost-neutral vs road+ocean.
-    costMult: 0.98,
-    tagline: 'Road + ocean optimized — 2–3 weeks, balanced CO₂',
-    transitBand: '2–3 weeks',
-    slaRisk: 'Low',
-    feasibility: 'Drop-in for most lanes',
-    narrative: 'Rail to port + ocean + optimized delivery. The pragmatic default — meaningful CO₂ cut with little service impact.',
-  });
-  const best = mk('best_co2', bestLegs, {
-    label: 'Best for CO₂',
-    dwell: 8,
-    // Consolidation + slow steaming trims freight slightly — but the longer
-    // transit carries inventory cost, so the net saving is modest, not magic.
-    costMult: 0.95,
-    tagline: 'Ocean-heavy + rail inland + consolidation — lowest CO₂',
-    transitBand: '4–6 weeks',
-    slaRisk: 'Higher (longer transit)',
-    feasibility: 'Where lead time allows',
-    narrative: 'Rail inland, nearest greener gateway, consolidated full containers and slow-steaming ocean. The lowest-carbon path.',
-  });
-
-  // Deltas vs current
-  for (const s of [optimal, balanced, best]) {
-    s.co2eDeltaTonnes = round(cur.co2eTonnes - s.co2eTonnes, 3);
-    s.co2eDeltaPct = round(((cur.co2eTonnes - s.co2eTonnes) / cur.co2eTonnes) * 100, 1);
-    s.costDeltaUsd = s.freightUsd - cur.freightUsd;
-    s.transitDeltaDays = round(s.transitDays - cur.transitDays, 1);
-  }
-  cur.co2eDeltaTonnes = 0;
-  cur.co2eDeltaPct = 0;
-  cur.costDeltaUsd = 0;
-  cur.transitDeltaDays = 0;
-
-  return { current: cur, optimal, balanced, best };
 }
 
-// ── Shipment generation ─────────────────────────────────────────────────────
-const VENDOR_BY_ORIGIN = VENDORS.reduce((m, v) => ((m[v.origin] ??= v), m), {});
+const costPerTonneKmLeg = (entry, mode, weightTonnes, seq) =>
+  makeLeg(
+    { ...entry, co2e: (weightTonnes * entry.distanceKm * entry.ef) / 1000, sourceRef: entry.refs[0] },
+    mode, seq, weightTonnes,
+  );
 
-let shipSeq = 0;
-// A handful of customers carry most of the volume (Pareto / concentration —
-// the hotspot story the brief calls for). Weight selection accordingly.
-const CUSTOMER_WEIGHTS = {
-  'Atlantic Spice Imports': 5,
-  'Antwerp Spice Group': 4.5,
-  'Britannia Spice Ltd': 3.5,
-  'Rotterdam Flavour BV': 3,
-  'Siam Spice Imports': 3,
-  'Guangzhou Spice Trading': 2.5,
-  'Gulf Coast Seasonings': 2.5,
-  'Rhineland Seasonings': 2,
-  'Levant Spice Trading': 2,
-  'Nippon Flavour KK': 1.6,
-};
-function buildShipment(forcedPeriod) {
-  const product = pickWeighted(PRODUCTS.map((p) => [p, p.category === 'Chilli & Cayenne' ? 3 : 1]));
-  const customer = pickWeighted(CUSTOMERS.map((c) => [c, CUSTOMER_WEIGHTS[c.name] ?? 1]));
-  const region = customer.region;
-  const destPort = customer.port;
-  const vendor = pick(VENDORS);
-  const origin = vendor.origin;
-  const originPort = pick(PORT_BY_REGION[region] ?? ['Nhava Sheva']);
-  const lsp = pick(LSPS);
-  const period = forcedPeriod ?? pick(MONTHS);
-  const year = Number(period.split('-')[0]);
-  // Day-level ship date within the month (day-wise shipment data).
-  const date = `${period}-${String(randInt(1, 28)).padStart(2, '0')}`;
+/** Sailings to a destination that the workbook records, shortest sea leg first. */
+const oceanOptionsTo = (destPort) =>
+  [...oceanCatalogue.values()].filter((e) => e.dest === destPort).sort((a, b) => a.distanceKm - b.distanceKm);
 
-  // ~6% air exceptions (tiny urgent/sample shipments); rest ocean-led containers.
-  const isAir = rng() < 0.06;
-  const weightTonnes = isAir
-    ? round(rand(0.02, 0.6), 3)
-    : round(rand(9, 25), 2);
-  const isConsolidated = !isAir && rng() < 0.34;
-  const weightSharePct = isConsolidated ? randInt(30, 80) : 100;
-  const inlandMode = !isAir && rng() < 0.4 ? 'rail' : 'road';
-  const monthlyTrips = isAir ? 1 : pickWeighted([[1, 5], [2, 4], [3, 2], [4, 1]]);
+// ══════════════════════════════════════════════════════════════════════════
+// 2. Flatten the workbook into shipments
+// ══════════════════════════════════════════════════════════════════════════
 
-  const dest = DEST_HINTERLAND[destPort];
-  const destCoord = { lat: dest.lat, lon: dest.lon };
-  const destCity = dest.city;
+const raw = [];
+let seqNo = 0;
 
-  const scenarios = buildScenarios({
-    origin, originPort, destPort, destCity, destCoord, weightTonnes, inlandMode, isAir,
-  });
-  const current = scenarios.current;
-  // ETA = ship date + expected transit; together they set the live status.
-  const eta = addDays(date, Math.max(1, Math.round(current.transitDays)));
-  const status = statusForDates(date, eta);
+for (const year of src.years) {
+  const fyTag = year.reportingYear.replace(/[^0-9]/g, '');
 
-  // Apply realized program reduction to recent periods (so the trend bends down).
-  const realized = realizedReductionPct(period);
-  const co2eTonnes = round(current.co2eTonnes * (1 - realized), 3);
-  const totalDistanceKm = round(current.legs.reduce((s, l) => s + l.distanceKm, 0), 1);
-  const co2ePerTonne = round(co2eTonnes / weightTonnes, 3);
-  const co2ePerTonneKm = round((co2eTonnes * 1e6) / Math.max(weightTonnes * totalDistanceKm, 0.001), 1); // g CO₂e/t·km
-
-  const airAvoidable = isAir ? rng() < 0.7 : null;
-  const dataConfidence = pickWeighted([['High', 5], ['Medium', 3], ['Low', 1.4]]);
-
-  const best = scenarios.best;
-  const reductionPotentialTonnes = round(Math.max(0, current.co2eTonnes - best.co2eTonnes) * monthlyTrips, 2);
-  // Per-shipment avoidable (this single move, current → best) — used for the
-  // forward window so the scheduler doesn't sum annualized lane potential.
-  const avoidableTonnes = round(Math.max(0, co2eTonnes - best.co2eTonnes), 3);
-
-  shipSeq += 1;
-  const shipmentId = `shp-${String(shipSeq).padStart(4, '0')}`;
-
-  return {
-    shipmentId,
-    period,
-    year,
-    date,
-    eta,
-    status,
-    productSku: product.sku,
-    productName: product.name,
-    category: product.category,
-    family: product.family,
-    shu: product.shu,
-    customer: customer.name,
-    customerGroup: customer.group,
-    market: GEO[destPort].country,
-    region,
-    vendor: vendor.name,
-    processor: vendor.name,
-    vendorControllability: vendor.controllability,
-    lsp: lsp.name,
-    carrier: lsp.carrier,
-    lspIntensityIndex: lsp.intensityIndex,
-    origin,
-    originState: GEO[origin].state,
-    originPort,
-    destPort,
-    destCity,
-    destCountry: GEO[destPort].country,
-    modePath: current.modePath,
-    primaryMode: isAir ? 'Air' : 'Ocean',
-    inlandMode: isAir ? null : MODE_LABEL[inlandMode],
-    weightTonnes,
-    weightSharePct,
-    isConsolidated,
-    monthlyTrips,
-    totalDistanceKm,
-    oceanDistanceKm: round(current.legs.filter((l) => l.mode === 'ocean').reduce((s, l) => s + l.distanceKm, 0), 1),
-    roadDistanceKm: round(current.legs.filter((l) => l.mode === 'road').reduce((s, l) => s + l.distanceKm, 0), 1),
-    railDistanceKm: round(current.legs.filter((l) => l.mode === 'rail').reduce((s, l) => s + l.distanceKm, 0), 1),
-    airDistanceKm: round(current.legs.filter((l) => l.mode === 'air').reduce((s, l) => s + l.distanceKm, 0), 1),
-    co2eTonnes,
-    co2eGrossTonnes: current.co2eTonnes,
-    co2ePerTonne,
-    co2ePerTonneKm,
-    realizedReductionPct: round(realized * 100, 1),
-    freightUsd: current.freightUsd,
-    transitDays: current.transitDays,
-    dataConfidence,
-    airException: isAir,
-    airAvoidable,
-    reductionPotentialTonnes,
-    avoidableTonnes,
-    bestScenarioKind: 'best_co2',
-    // carried for detail/aggregation, stripped from the light index
-    _scenarios: scenarios,
-    _vendor: vendor,
-    _lsp: lsp,
-    _product: product,
-    _customer: customer,
-  };
-}
-
-// ── Forward schedule (future planned shipments) ─────────────────────────────
-// Project a recurring lane into the future: clone a recent shipment (so lane,
-// route and scenarios stay consistent — "based on previous data and trends"),
-// re-date it forward, mark it Planned, and carry the reduction ramp a little
-// further. These power the Scheduler / forward-planning views.
-function buildPlannedShipment(template, date) {
-  shipSeq += 1;
-  const shipmentId = `shp-${String(shipSeq).padStart(4, '0')}`;
-  const period = date.slice(0, 7);
-  const year = Number(date.slice(0, 4));
-  const eta = addDays(date, Math.max(1, Math.round(template.transitDays)));
-  const daysOut = Math.round((new Date(`${date}T00:00:00Z`).getTime() - AS_OF.getTime()) / DAY_MS);
-  const realized = clamp(0.14 + (daysOut / 30) * 0.005, 0.14, 0.17); // continued ramp
-  const co2eTonnes = round(template.co2eGrossTonnes * (1 - realized), 3);
-  return {
-    ...template,
-    shipmentId,
-    period,
-    year,
-    date,
-    eta,
-    status: 'Planned',
-    co2eTonnes,
-    co2ePerTonne: round(co2eTonnes / template.weightTonnes, 3),
-    co2ePerTonneKm: round((co2eTonnes * 1e6) / Math.max(template.weightTonnes * template.totalDistanceKm, 0.001), 1),
-    realizedReductionPct: round(realized * 100, 1),
-    avoidableTonnes: round(Math.max(0, co2eTonnes - template._scenarios.best.co2eTonnes), 3),
-  };
-}
-
-// ── Lanes (decisioning corridors) ───────────────────────────────────────────
-// A lane = unique (origin → originPort → destPort → customer → product category)
-// flow. Aggregates its shipments and owns the Current + 3 alternative scenarios.
-function laneKeyOf(s) {
-  return [s.origin, s.destPort, s.category].join('|');
-}
-
-function buildLanes(shipments) {
-  const groups = new Map();
-  for (const s of shipments) {
-    const key = laneKeyOf(s);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(s);
-  }
-  const lanes = [];
-  let i = 0;
-  for (const [, members] of groups) {
-    i += 1;
-    const sample = members[0];
-    const laneId = `lane-${String(i).padStart(4, '0')}`;
-    const shipmentCount = members.length;
-    const totalWeightTonnes = round(members.reduce((s, m) => s + m.weightTonnes, 0), 2);
-    const totalCo2eTonnes = round(members.reduce((s, m) => s + m.co2eTonnes, 0), 2);
-    const airMembers = members.filter((m) => m.airException);
-    const oceanMembers = members.filter((m) => !m.airException);
-    const airSharePct = round((airMembers.length / shipmentCount) * 100, 0);
-    // Lane scenarios always model the ocean-led containerized corridor (the
-    // decisioning unit). Air is a per-shipment exception handled in Air Watch.
-    // Scenarios are modelled per representative shipment; annual figures scale
-    // by the lane's annual trip frequency.
-    const repMembers = oceanMembers.length ? oceanMembers : members;
-    const repWeight = Math.max(9, round(repMembers.reduce((s, m) => s + m.weightTonnes, 0) / repMembers.length, 2));
-    // Annualize from OBSERVED lane throughput: shipments since the lane first
-    // ran, measured to "today" — so a lane that shipped 3 times in one year
-    // two years ago is ~1.5/yr, not 3/yr, and the network's summed annual
-    // activity stays consistent with what it actually ships.
-    const memberDates = members.map((m) => new Date(`${m.date}T00:00:00Z`).getTime());
-    const asOfMs = new Date(`${AS_OF_ISO}T00:00:00Z`).getTime();
-    const spanYears = clamp((asOfMs - Math.min(...memberDates)) / (365.25 * 86_400_000), 1, 7);
-    const annualFrequency = Math.max(1, Math.round(shipmentCount / spanYears));
-    const avgCo2ePerTonne = round(totalCo2eTonnes / Math.max(totalWeightTonnes, 0.001), 3);
-    const totalTonKm = members.reduce((s, m) => s + m.weightTonnes * m.totalDistanceKm, 0);
-    const avgCo2ePerTonneKm = round((totalCo2eTonnes * 1e6) / Math.max(totalTonKm, 0.001), 1); // g CO₂e/t·km
-
-    const sampleInland = repMembers.find((m) => m.inlandMode)?.inlandMode || 'Road';
-    const scenarios = buildScenarios({
-      origin: sample.origin,
-      originPort: sample.originPort,
-      destPort: sample.destPort,
-      destCity: sample.destCity,
-      destCoord: { lat: DEST_HINTERLAND[sample.destPort].lat, lon: DEST_HINTERLAND[sample.destPort].lon },
-      weightTonnes: repWeight,
-      inlandMode: sampleInland === 'Rail' ? 'rail' : 'road',
-      isAir: false,
-    });
-
-    // What the lane ACTUALLY emits per year (observed, net) — the hard ceiling
-    // for every annual claim made about it.
-    const observedAnnualTonnes = round(totalCo2eTonnes / spanYears, 2);
-    const perShipmentSaving = Math.max(0, scenarios.current.co2eTonnes - scenarios.best.co2eTonnes);
-    const reductionPotentialPct = scenarios.best.co2eDeltaPct;
-    const reductionPotentialTonnes = round(
-      Math.min(perShipmentSaving * annualFrequency, observedAnnualTonnes * (reductionPotentialPct / 100)),
-      2,
-    );
-    const recommendedApproach = reductionPotentialPct >= 22 ? 'best_co2' : 'balanced';
-    // Realistic adoption: not every lane can fully switch to rail/nearest port.
-    // A feasibility factor tempers the theoretical max into a credible,
-    // 10–20%-ambition-aligned realizable reduction.
-    const feasibilityFactor = clamp(
-      0.16 +
-        (sample.vendorControllability === 'High' ? 0.12 : sample.vendorControllability === 'Medium' ? 0.05 : 0) +
-        (NEAREST_PORT_BY_ORIGIN[sample.origin] ? 0.05 : 0) +
-        rand(-0.03, 0.05),
-      0.1,
-      0.5,
-    );
-    const realizableReductionTonnes = round(reductionPotentialTonnes * feasibilityFactor, 2);
-
-    lanes.push({
-      laneId,
-      label: `${sample.origin} → ${sample.destPort} · ${sample.category}`,
-      origin: sample.origin,
-      originState: GEO[sample.origin].state,
-      originPort: sample.originPort,
-      destPort: sample.destPort,
-      destCity: sample.destCity,
-      destCountry: sample.destCountry,
-      market: sample.market,
-      region: sample.region,
-      productCategory: sample.category,
-      customer: sample.customer,
-      customerGroup: sample.customerGroup,
-      vendor: sample.vendor,
-      lsp: sample.lsp,
-      lspIntensityIndex: sample.lspIntensityIndex,
-      vendorControllability: sample.vendorControllability,
-      primaryMode: 'Ocean',
-      modePath: scenarios.current.modePath,
-      hasAirExceptions: airMembers.length > 0,
-      airSharePct,
-      airShipmentCount: airMembers.length,
-      shipmentCount,
-      totalWeightTonnes,
-      totalCo2eTonnes,
-      observedAnnualTonnes,
-      avgCo2ePerTonne,
-      avgCo2ePerTonneKm,
-      annualFrequency,
-      repWeightTonnes: repWeight,
-      // Per representative shipment (scenarios are modelled per shipment).
-      currentPerShipmentTonnes: scenarios.current.co2eTonnes,
-      balancedPerShipmentTonnes: scenarios.balanced.co2eTonnes,
-      bestPerShipmentTonnes: scenarios.best.co2eTonnes,
-      optimalPerShipmentTonnes: scenarios.optimal.co2eTonnes,
-      reductionPotentialTonnes,
-      reductionPotentialPct,
-      realizableReductionTonnes,
-      feasibilityFactor: round(feasibilityFactor, 2),
-      recommendedApproach,
-      coords: {
-        origin: { lat: GEO[sample.origin].lat, lon: GEO[sample.origin].lon },
-        originPort: { lat: GEO[sample.originPort].lat, lon: GEO[sample.originPort].lon },
-        destPort: { lat: GEO[sample.destPort].lat, lon: GEO[sample.destPort].lon },
-        destCity: { lat: DEST_HINTERLAND[sample.destPort].lat, lon: DEST_HINTERLAND[sample.destPort].lon },
-      },
-      _scenarios: scenarios,
-      _members: members.map((m) => m.shipmentId),
-    });
-  }
-  return lanes.sort((a, b) => b.reductionPotentialTonnes - a.reductionPotentialTonnes);
-}
-
-// ── Recommendations (the action engine) ─────────────────────────────────────
-const ACTION_META = {
-  'air-avoidance': { agent: 'Mode Governance Agent', owner: 'logistics', complexity: 'Medium' },
-  'mode-shift': { agent: 'Route & Mode Agent', owner: 'logistics', complexity: 'Medium' },
-  'origin-port': { agent: 'Route & Mode Agent', owner: 'logistics', complexity: 'Medium' },
-  'dest-port': { agent: 'Route & Mode Agent', owner: 'logistics', complexity: 'High' },
-  consolidation: { agent: 'Consolidation Agent', owner: 'logistics', complexity: 'Low' },
-  'lsp-swap': { agent: 'Partner Influence Agent', owner: 'procurement', complexity: 'Medium' },
-  'vendor-intervention': { agent: 'Partner Influence Agent', owner: 'procurement', complexity: 'High' },
-  'route-swap': { agent: 'Route & Mode Agent', owner: 'logistics', complexity: 'Medium' },
-};
-
-let recSeq = 0;
-function buildRecommendations(lanes) {
-  const recs = [];
-  for (const lane of lanes) {
-    const s = lane._scenarios;
-    const F = lane.annualFrequency; // per-shipment scenario deltas → annual
-    const currentAnnual = round(s.current.co2eTonnes * F, 2);
-    const annualFreight = Math.max(1, s.current.freightUsd * F);
-    const candidates = [];
-
-    // Each candidate's `notional` is an ANNUAL tonnes figure; `cost(alloc)`
-    // returns the annual USD impact for the allocated tonnes (− = saving).
-    candidates.push({
-      type: 'mode-shift',
-      approach: 'best_co2',
-      title: `Rail-inland + ocean-heavy on ${lane.origin}→${lane.destPort}`,
-      rationale: (t, pct) => `Switching inland road to rail, routing via the nearest gateway and consolidating containers cuts ~${t} t CO₂e/yr (${pct}% of this lane) — the full Best-for-CO₂ play.`,
-      notional: round(s.best.co2eDeltaTonnes * F, 2),
-      cost: (scale) => Math.round(s.best.costDeltaUsd * F * scale),
-      approachScenario: s.best,
-    });
-    if (lane.reductionPotentialPct < 24) {
-      candidates.push({
-        type: 'route-swap',
-        approach: 'balanced',
-        title: `Balanced road+ocean optimization for ${lane.customer}`,
-        rationale: (t, pct) => `A balanced rail-to-port + optimized delivery plan saves ~${t} t CO₂e/yr (${pct}% of this lane) with minimal service impact (${s.balanced.transitBand}).`,
-        notional: round(s.balanced.co2eDeltaTonnes * F, 2),
-        cost: (scale) => Math.round(s.balanced.costDeltaUsd * F * scale),
-        approachScenario: s.balanced,
-      });
-    }
-    if (NEAREST_PORT_BY_ORIGIN[lane.origin] && NEAREST_PORT_BY_ORIGIN[lane.origin] !== lane.originPort) {
-      candidates.push({
-        type: 'origin-port',
-        approach: 'best_co2',
-        title: `Re-route ${lane.origin} via ${NEAREST_PORT_BY_ORIGIN[lane.origin]} port`,
-        rationale: (t) => `${lane.origin} currently feeds ${lane.originPort}. ${NEAREST_PORT_BY_ORIGIN[lane.origin]} is closer — the shorter inland leg avoids ~${t} t CO₂e/yr.`,
-        notional: round(s.best.co2eDeltaTonnes * F * 0.4, 2),
-        cost: (scale) => Math.round(s.best.costDeltaUsd * F * 0.4 * scale),
-        approachScenario: s.best,
-      });
-    }
-    if (lane.shipmentCount >= 3) {
-      candidates.push({
-        type: 'consolidation',
-        approach: 'balanced',
-        title: `Consolidate ${lane.shipmentCount} ${lane.customer} shipments`,
-        rationale: (t) => `${lane.shipmentCount} shipments run this lane. Consolidating into full containers reduces trips and inland road legs — ~${t} t CO₂e/yr, low-effort and low-risk.`,
-        notional: round(s.balanced.co2eDeltaTonnes * F * 0.5, 2),
-        cost: (scale) => Math.round(s.balanced.costDeltaUsd * F * 0.5 * scale),
-        approachScenario: s.balanced,
-      });
-    }
-    if (lane.lspIntensityIndex > 1.02) {
-      const greener = LSPS.filter((l) => l.intensityIndex < 0.95)[0];
-      candidates.push({
-        type: 'lsp-swap',
-        approach: 'balanced',
-        title: `Move ${lane.lsp} volume to ${greener.name}`,
-        rationale: (t) => `${lane.lsp} runs ~${Math.round((lane.lspIntensityIndex - 1) * 100)}% above fleet-average CO₂ intensity. ${greener.name} (${greener.carrier}) operates a greener fleet — worth ~${t} t CO₂e/yr, at a green-tender premium.`,
-        notional: round((lane.totalCo2eTonnes / 3) * (lane.lspIntensityIndex - greener.intensityIndex) * 0.5, 2),
-        // Greener fleets charge a tender premium — this action COSTS money.
-        cost: () => Math.round(annualFreight * rand(0.02, 0.05)),
-        approachScenario: s.balanced,
-      });
-    }
-    if (lane.vendorControllability !== 'High' && rng() < 0.4) {
-      candidates.push({
-        type: 'vendor-intervention',
-        approach: 'best_co2',
-        title: `Align ${lane.vendor} on greener gateway`,
-        rationale: (t) => `${lane.vendor} controls the origin handoff and current port choice. A data-backed governance conversation can unlock ~${t} t CO₂e/yr of the rail-inland + nearest-port plan.`,
-        notional: round(s.best.co2eDeltaTonnes * F * 0.35, 2),
-        // Vendor programs carry engagement cost (QBRs, audits, incentives).
-        cost: () => randInt(1500, 6000),
-        approachScenario: s.best,
-      });
-    }
-
-    // ── Mutually exclusive allocation ────────────────────────────────────
-    // The candidates all pull the same physical levers, so their savings
-    // overlap. Scale them to fit inside the lane's reduction headroom: the
-    // Best-for-CO₂ delta, hard-capped by what the lane OBSERVABLY emits per
-    // year — the sum of a lane's action savings can never exceed either.
-    const headroom = Math.min(
-      round(s.best.co2eDeltaTonnes * F, 2),
-      currentAnnual,
-      round(lane.observedAnnualTonnes * (s.best.co2eDeltaPct / 100), 2),
-    );
-    const notionalSum = candidates.reduce((sum, c) => sum + Math.max(c.notional, 0), 0);
-    const scale = notionalSum > 0 ? Math.min(1, headroom / notionalSum) : 0;
-
-    for (const c of candidates) {
-      const annualSaving = round(Math.max(c.notional, 0) * scale, 2);
-      if (annualSaving < 0.05) continue;
-      recSeq += 1;
-      const meta = ACTION_META[c.type];
-      const controllability = ['lsp-swap', 'vendor-intervention'].includes(c.type)
-        ? 'Influence (partner)'
-        : 'Direct (Terova)';
-      // Direct levers are better understood than partner-dependent ones.
-      const confidence = controllability === 'Direct (Terova)' ? randInt(72, 95) : randInt(62, 82);
-      const slaRisk = c.approachScenario.slaRisk;
-      const savingPct = Math.min(round((annualSaving / Math.max(currentAnnual, 0.01)) * 100, 1), c.approachScenario.co2eDeltaPct);
-      const costImpactUsd = c.cost(scale);
-      const macUsdPerTonne = clamp(Math.round(costImpactUsd / Math.max(annualSaving, 0.01)), -5000, 5000);
-      recs.push({
-        id: `rec-${String(recSeq).padStart(4, '0')}`,
-        laneId: lane.laneId,
-        laneLabel: lane.label,
-        customer: lane.customer,
-        origin: lane.origin,
-        destPort: lane.destPort,
-        region: lane.region,
-        productCategory: lane.productCategory,
-        vendor: lane.vendor,
-        lsp: lane.lsp,
-        type: c.type,
-        agent: meta.agent,
-        approach: c.approach,
-        title: c.title,
-        rationale: c.rationale(annualSaving, savingPct),
-        estCo2eSavingTonnes: annualSaving,
-        estCo2eSavingPct: savingPct,
-        costImpactUsd,
-        costImpactLabel: costImpactUsd <= 0 ? 'Cost-neutral / saving' : 'Cost increase',
-        macUsdPerTonne,
-        // Before → after transport-mode chains, so the UI can show what changes.
-        fromModePath: s.current.modePath,
-        toModePath: c.approachScenario.modePath,
-        transitImpactDays: c.approachScenario.transitDeltaDays,
-        slaImpact: slaRisk,
-        confidence,
-        complexity: meta.complexity,
-        controllability,
-        ownerPersona: meta.owner,
-        priorityScore: round(annualSaving * (confidence / 100), 2),
-        status: 'suggested',
-        evidence: [
-          { label: 'Current CO₂e', value: `${currentAnnual} t/yr` },
-          { label: 'After action', value: `${round(currentAnnual - annualSaving, 2)} t/yr` },
-          { label: 'Abatement cost', value: costImpactUsd <= 0 ? `saves $${Math.abs(macUsdPerTonne)}/t` : `$${macUsdPerTonne}/t` },
-          { label: 'Mode path', value: c.approachScenario.modePath.join(' → ') },
-          { label: 'Transit', value: c.approachScenario.transitBand },
-        ],
-      });
-    }
-  }
-  return recs;
-}
-
-/** Per-shipment air-avoidance recommendations (the air-exception governance). */
-function buildAirRecs(shipments, laneByShipment) {
-  const recs = [];
-  for (const s of shipments.filter((x) => x.airException)) {
-    const sc = s._scenarios; // current = air, best = ocean+rail
-    const perTrip = Math.max(0, sc.current.co2eTonnes - sc.best.co2eTonnes);
-    // One observed exception ≈ one avoidable recurrence per year — never
-    // multiplied by aspirational trip counts.
-    const saving = round(perTrip, 2);
-    if (saving <= 0) continue;
-    recSeq += 1;
-    const confidence = s.airAvoidable ? randInt(78, 96) : randInt(55, 72);
-    recs.push({
-      id: `rec-${String(recSeq).padStart(4, '0')}`,
-      laneId: laneByShipment.get(s.shipmentId),
-      shipmentId: s.shipmentId,
-      laneLabel: `${s.origin} → ${s.destCity}`,
-      customer: s.customer,
-      origin: s.origin,
-      destPort: s.destPort,
-      region: s.region,
-      productCategory: s.category,
-      vendor: s.vendor,
-      lsp: s.lsp,
-      type: 'air-avoidance',
-      agent: 'Mode Governance Agent',
-      approach: 'best_co2',
-      title: `${s.airAvoidable ? 'Shift avoidable air' : 'Govern air exception'} — ${s.customer}`,
-      rationale: s.airAvoidable
-        ? `${s.productName} moved by air to ${s.destPort}. With earlier planning this could ship by ocean, cutting ~${saving} t CO₂e/yr (${sc.best.co2eDeltaPct}%). Classify and shift.`
-        : `${s.productName} air shipment to ${s.destPort} appears genuinely urgent. Document the justification and govern future occurrences against an air budget.`,
-      estCo2eSavingTonnes: saving,
-      estCo2eSavingPct: sc.best.co2eDeltaPct,
-      costImpactUsd: Math.round(sc.best.costDeltaUsd),
-      costImpactLabel: 'Cost-neutral / saving',
-      macUsdPerTonne: clamp(Math.round(sc.best.costDeltaUsd / Math.max(saving, 0.01)), -5000, 5000),
-      fromModePath: sc.current.modePath,
-      toModePath: sc.best.modePath,
-      transitImpactDays: sc.best.transitDeltaDays,
-      slaImpact: 'Higher (longer transit)',
-      confidence,
-      complexity: 'Medium',
-      controllability: 'Direct (Terova)',
-      ownerPersona: 'logistics',
-      priorityScore: round(saving * (confidence / 100), 2),
-      status: 'suggested',
-      airAvoidable: s.airAvoidable,
-      evidence: [
-        { label: 'Current (air)', value: `${round(sc.current.co2eTonnes, 2)} t` },
-        { label: 'Ocean alternative', value: `${round(sc.best.co2eTonnes, 2)} t` },
-        { label: 'Mode path', value: sc.best.modePath.join(' → ') },
-        { label: 'Transit', value: sc.best.transitBand },
+  // Export chain: the inland legs plus the ocean spine.
+  for (const sh of year.exportShipments) {
+    const o = sh.ocean;
+    const weight = o.qtyKg / 1000;
+    raw.push({
+      shipmentId: `SHP-${fyTag}-${String(++seqNo).padStart(3, '0')}`,
+      stream: 'export',
+      reportingYear: year.reportingYear,
+      date: o.date,
+      status: 'Delivered',
+      ...classifyProduct(o.item),
+      weightTonnes: weight,
+      gateway: o.source,
+      destPort: o.dest,
+      containerType: o.container ?? null,
+      legs: [
+        ...sh.inland.map((l, i) => makeLeg(l, modeOfInlandRow(l), i + 1, weight)),
+        makeLeg(o, 'ocean', sh.inland.length + 1, weight),
       ],
+      sourceRef: o.sourceRef,
+      derivedFromRef: null,
     });
   }
-  return recs;
-}
 
-// ── Hotspots ────────────────────────────────────────────────────────────────
-function topGroups(shipments, keyFn, labelFn, limit = 8) {
-  const m = new Map();
-  for (const s of shipments) {
-    const k = keyFn(s);
-    if (!m.has(k)) m.set(k, { key: k, label: labelFn(s), co2eTonnes: 0, weightTonnes: 0, shipments: 0 });
-    const g = m.get(k);
-    g.co2eTonnes += s.co2eTonnes;
-    g.weightTonnes += s.weightTonnes;
-    g.shipments += 1;
+  // Air freight: the road run to the airport plus the flight.
+  for (const sh of year.airShipments) {
+    const a = sh.air;
+    const weight = a.qtyKg / 1000;
+    raw.push({
+      shipmentId: `SHP-${fyTag}-AIR-${String(a.sl ?? 1).padStart(2, '0')}`,
+      stream: 'export',
+      reportingYear: year.reportingYear,
+      date: a.date,
+      status: 'Delivered',
+      ...classifyProduct(a.item),
+      weightTonnes: weight,
+      gateway: null,
+      destPort: a.dest,
+      containerType: null,
+      legs: [
+        ...sh.inland.map((l, i) => makeLeg(l, modeOfInlandRow(l), i + 1, weight)),
+        makeLeg(a, 'air', sh.inland.length + 1, weight),
+      ],
+      sourceRef: a.sourceRef,
+      derivedFromRef: null,
+    });
   }
-  return [...m.values()]
-    .map((g) => ({
-      ...g,
-      co2eTonnes: round(g.co2eTonnes, 2),
-      weightTonnes: round(g.weightTonnes, 2),
-      co2ePerTonne: round(g.co2eTonnes / Math.max(g.weightTonnes, 0.001), 3),
-    }))
-    .sort((a, b) => b.co2eTonnes - a.co2eTonnes)
-    .slice(0, limit);
+
+  // First-mile collection: one road run per row, carrying a monthly trip count,
+  // so the workbook's CO₂e for the row already covers all of those trips.
+  let colNo = 0;
+  for (const row of year.collectionMovements) {
+    const weight = row.qtyKg / 1000;
+    raw.push({
+      shipmentId: `COL-${fyTag}-${String(++colNo).padStart(3, '0')}`,
+      stream: 'collection',
+      reportingYear: year.reportingYear,
+      date: row.date,
+      status: 'Delivered',
+      ...classifyProduct(row.item),
+      weightTonnes: weight,
+      gateway: null,
+      destPort: row.dest,
+      containerType: null,
+      truckTrips: row.trips ?? 1,
+      legs: [makeLeg(row, 'road', 1, weight)],
+      sourceRef: row.sourceRef,
+      derivedFromRef: null,
+    });
+  }
 }
 
-function buildHotspots(shipments) {
+// ── To-be-planned shipments ────────────────────────────────────────────────
+// The workbook's last dispatch is 30 Jun 2024, so the app's "today" is 1 Jul
+// 2024 and the forward book is the FY23-24 July–September quarter rolled
+// forward 366 days. Product, weight, gateway, container and every distance stay
+// exactly as recorded; only the dates move.
+const LAST_DISPATCH = raw.map((s) => s.date).sort().at(-1);
+const APP_TODAY = addDays(LAST_DISPATCH, 1);
+const ROLL_DAYS = 366;
+const PLAN_QUARTER = ['2023-07', '2023-08', '2023-09'];
+
+raw
+  .filter((s) => s.reportingYear === 'FY23-24' && s.stream === 'export' && PLAN_QUARTER.includes(s.date.slice(0, 7)))
+  .forEach((s, i) => {
+    raw.push({
+      ...s,
+      shipmentId: `PLN-${String(i + 1).padStart(3, '0')}`,
+      status: 'Planned',
+      reportingYear: 'FY24-25 (to be planned)',
+      date: addDays(s.date, ROLL_DAYS),
+      legs: s.legs.map((l) => ({ ...l })),
+      derivedFromRef: s.sourceRef,
+    });
+  });
+
+// ══════════════════════════════════════════════════════════════════════════
+// 3. Per-shipment rollups
+// ══════════════════════════════════════════════════════════════════════════
+
+function rollup(s) {
+  const legs = s.legs;
+  const co2eOf = (mode) => sum(legs.filter((l) => l.mode === mode), (l) => l.co2eTonnes);
+  const kmOf = (mode) => sum(legs.filter((l) => l.mode === mode), (l) => l.distanceKm);
+  const co2e = sum(legs, (l) => l.co2eTonnes);
+  const totalKm = sum(legs, (l) => l.distanceKm);
+  const destPort = s.destPort;
+  const g = place(destPort);
   return {
-    byProductCategory: topGroups(shipments, (s) => s.category, (s) => s.category),
-    byCustomer: topGroups(shipments, (s) => s.customer, (s) => s.customer),
-    byMarket: topGroups(shipments, (s) => s.market, (s) => s.market),
-    byMode: topGroups(shipments, (s) => s.primaryMode, (s) => `${s.primaryMode}-led`),
-    byOriginPort: topGroups(shipments, (s) => s.originPort, (s) => s.originPort),
-    byDestPort: topGroups(shipments, (s) => s.destPort, (s) => s.destPort),
-    byVendor: topGroups(shipments, (s) => s.vendor, (s) => s.vendor),
-    byLsp: topGroups(shipments, (s) => s.lsp, (s) => s.lsp),
-    byOrigin: topGroups(shipments, (s) => s.origin, (s) => `${s.origin}, ${s.originState}`),
+    ...s,
+    truckTrips: s.truckTrips ?? 1,
+    period: s.date.slice(0, 7),
+    year: Number(s.date.slice(0, 4)),
+    origin: legs[0].from,
+    icd: legs.map((l) => l.to).find((p) => place(p).kind === 'icd') ?? null,
+    destCountry: DEST_MARKET[destPort] ?? g.country,
+    market: DEST_MARKET[destPort] ?? g.country,
+    region: g.region ?? 'APAC',
+    modePath: uniq(legs.map((l) => l.modeLabel)),
+    primaryMode: [...legs].sort(byDesc((l) => l.co2eTonnes))[0].modeLabel,
+    roadKm: r3(kmOf('road')),
+    railKm: r3(kmOf('rail')),
+    oceanKm: r3(kmOf('ocean')),
+    airKm: r3(kmOf('air')),
+    totalDistanceKm: r3(totalKm),
+    fuelLitres: sum(legs, (l) => l.fuelLitres ?? 0),
+    co2eTonnes: r6(co2e),
+    roadCo2eTonnes: r6(co2eOf('road')),
+    railCo2eTonnes: r6(co2eOf('rail')),
+    oceanCo2eTonnes: r6(co2eOf('ocean')),
+    airCo2eTonnes: r6(co2eOf('air')),
+    co2ePerTonne: s.weightTonnes > 0 ? r4(co2e / s.weightTonnes) : 0,
+    co2ePerTonneKm: s.weightTonnes > 0 && totalKm > 0 ? r3((co2e * 1e6) / (s.weightTonnes * totalKm)) : 0,
+    transitDaysEst: Math.round(sum(legs, (l) => l.transitDaysEst)),
+    dataConfidence: 'High',
+    isAirFreight: legs.some((l) => l.mode === 'air'),
   };
 }
 
-// ── Partners (vendor / processor / LSP influence) ───────────────────────────
-function buildPartners(shipments, recs) {
-  const recsByVendor = new Map();
-  const recsByLsp = new Map();
-  for (const r of recs) {
-    if (r.type === 'vendor-intervention') recsByVendor.set(r.vendor, (recsByVendor.get(r.vendor) ?? 0) + r.estCo2eSavingTonnes);
-    if (r.type === 'lsp-swap') recsByLsp.set(r.lsp, (recsByLsp.get(r.lsp) ?? 0) + r.estCo2eSavingTonnes);
-  }
-  const vendorAgg = new Map();
-  const lspAgg = new Map();
-  for (const s of shipments) {
-    if (!vendorAgg.has(s.vendor))
-      vendorAgg.set(s.vendor, { name: s.vendor, origin: s.origin, controllability: s.vendorControllability, co2eTonnes: 0, weightTonnes: 0, shipments: 0 });
-    const v = vendorAgg.get(s.vendor);
-    v.co2eTonnes += s.co2eTonnes; v.weightTonnes += s.weightTonnes; v.shipments += 1;
-    if (!lspAgg.has(s.lsp))
-      lspAgg.set(s.lsp, { name: s.lsp, carrier: s.carrier, intensityIndex: s.lspIntensityIndex, greenProgram: s._lsp.greenProgram, co2eTonnes: 0, weightTonnes: 0, shipments: 0 });
-    const l = lspAgg.get(s.lsp);
-    l.co2eTonnes += s.co2eTonnes; l.weightTonnes += s.weightTonnes; l.shipments += 1;
-  }
-  const fin = (g, extra = {}) => ({
-    ...g,
-    co2eTonnes: round(g.co2eTonnes, 2),
-    weightTonnes: round(g.weightTonnes, 2),
-    co2ePerTonne: round(g.co2eTonnes / Math.max(g.weightTonnes, 0.001), 3),
+/** Lane = destination port × product category (collection keeps its own lanes). */
+const laneIdOf = (s) => (s.stream === 'collection'
+  ? `LN-COL-${slug(s.origin)}-${slug(s.destPort)}`
+  : `LN-${slug(s.destPort)}-${slug(s.category)}`);
+
+let enriched = raw.map(rollup).map((s) => ({ ...s, laneId: laneIdOf(s) }));
+
+// ══════════════════════════════════════════════════════════════════════════
+// 4. Route options — re-cost each shipment through evidenced chains
+// ══════════════════════════════════════════════════════════════════════════
+
+const OPTION_META = {
+  current: { label: 'As booked today', tagline: 'The route this shipment is on' },
+  'gateway-swap': { label: 'Different gateway', tagline: 'Leave India through another port' },
+  'shorter-sea': { label: 'Shorter sea routing', tagline: 'Same two ports, shorter sailing' },
+  'sea-instead-of-air': { label: 'Send by sea', tagline: 'Ocean routing to the same country' },
+  consolidate: { label: 'Share the truck', tagline: 'One truck run for the same-day shipments' },
+};
+
+function finishOption(kind, legs, gateway, current, extra) {
+  const co2e = sum(legs, (l) => l.co2eTonnes);
+  const days = Math.round(sum(legs, (l) => l.transitDaysEst));
+  const delta = current ? co2e - current.co2eTonnes : 0;
+  const modes = uniq(legs.map((l) => l.modeLabel));
+  // A gateway swap is named after what actually changes inland, so the label can
+  // never claim rail on an all-road routing.
+  const label = kind === 'gateway-swap'
+    ? `${modes.includes('Rail') ? 'Rail' : 'Road'} to ${gateway}`
+    : OPTION_META[kind].label;
+  const seaKm = sum(legs.filter((l) => l.mode === 'ocean' || l.mode === 'air'), (l) => l.distanceKm);
+  return {
+    // Two options can share a kind (two gateways, or two recorded sailings for
+    // one port pair), so the id carries the gateway and the long-haul distance.
+    id: `${kind}:${slug(gateway ?? 'none')}:${Math.round(seaKm)}`,
+    kind,
+    label,
+    tagline: OPTION_META[kind].tagline,
+    legs: legs.map((l, i) => ({ ...l, seq: i + 1 })),
+    modePath: uniq(legs.map((l) => l.modeLabel)),
+    gateway,
+    co2eTonnes: r6(co2e),
+    distanceKm: r3(sum(legs, (l) => l.distanceKm)),
+    transitDaysEst: days,
+    co2eDeltaTonnes: r6(delta),
+    co2eDeltaPct: current && current.co2eTonnes > 0 ? r3((delta / current.co2eTonnes) * 100) : 0,
+    transitDeltaDays: current ? days - current.transitDaysEst : 0,
+    isCurrent: kind === 'current',
     ...extra,
-  });
-  return {
-    vendors: [...vendorAgg.values()]
-      .map((v) => fin(v, { influenceableSavingTonnes: round(recsByVendor.get(v.name) ?? 0, 2) }))
-      .sort((a, b) => b.co2eTonnes - a.co2eTonnes),
-    lsps: [...lspAgg.values()]
-      .map((l) => fin(l, { influenceableSavingTonnes: round(recsByLsp.get(l.name) ?? 0, 2) }))
-      .sort((a, b) => b.co2eTonnes - a.co2eTonnes),
   };
 }
 
-// ── ESG evidence pack (baseline → realized → ambition) ──────────────────────
-function buildEvidence(shipments) {
-  const byMonth = new Map();
-  for (const s of shipments) {
-    if (!byMonth.has(s.period)) byMonth.set(s.period, { period: s.period, grossTonnes: 0, netTonnes: 0, weightTonnes: 0 });
-    const g = byMonth.get(s.period);
-    g.grossTonnes += s.co2eGrossTonnes;
-    g.netTonnes += s.co2eTonnes;
-    g.weightTonnes += s.weightTonnes;
+/** Heaviest single export load in the workbook — the truck capacity it evidences. */
+const MAX_TRUCK_TONNES = Math.max(...enriched.filter((s) => s.stream === 'export').map((s) => s.weightTonnes));
+
+/** Same-day, same-gateway shipments that could share one truck run. */
+const truckGroups = new Map();
+for (const s of enriched) {
+  if (s.stream !== 'export' || !s.gateway) continue;
+  const key = `${s.date}|${s.gateway}|${s.status}`;
+  truckGroups.set(key, [...(truckGroups.get(key) ?? []), s]);
+}
+
+function buildOptions(s) {
+  const weight = s.weightTonnes;
+  const current = finishOption('current', s.legs, s.gateway, null, {
+    timesUsedInWorkbook: 1,
+    evidence: `Recorded on tab ${s.sourceRef.split('!')[0]} of the workbook.`,
+    evidenceRefs: [s.sourceRef],
+  });
+  if (s.stream === 'collection') return [current];
+
+  const options = [current];
+  // Only keep an option that actually beats what is booked today.
+  const add = (opt) => { if (opt.co2eDeltaTonnes < -1e-9) options.push(opt); };
+
+  // (a) Air → sea, where the workbook records a sailing to the same country.
+  if (s.isAirFreight) {
+    const country = DEST_MARKET[s.destPort];
+    const best = [...oceanCatalogue.values()]
+      .filter((e) => DEST_MARKET[e.dest] === country)
+      .sort((a, b) => a.distanceKm - b.distanceKm)[0];
+    const routing = best && (INLAND_ROUTINGS.get(best.source) ?? [])[0];
+    if (best && routing) {
+      const legs = [...costInlandRouting(routing, weight), costPerTonneKmLeg(best, 'ocean', weight, 99)];
+      add(finishOption('sea-instead-of-air', legs, best.source, current, {
+        timesUsedInWorkbook: best.count,
+        evidence: `The workbook already ships to ${country} by sea on ${best.source} → ${best.dest} `
+          + `(${nf(best.distanceKm)} km, ${best.count} shipment${best.count === 1 ? '' : 's'}). Air is charged at `
+          + `${EF.air} kg CO₂e per tonne-km against ${EF.ocean} at sea — ${Math.round(EF.air / EF.ocean)}× more.`,
+        evidenceRefs: best.refs,
+      }));
+    }
+    return options;
   }
-  const monthly = [...byMonth.values()]
-    .sort((a, b) => (a.period < b.period ? -1 : 1))
-    .map((g) => ({
-      period: g.period,
-      grossTonnes: round(g.grossTonnes, 1),
-      netTonnes: round(g.netTonnes, 1),
-      avoidedTonnes: round(g.grossTonnes - g.netTonnes, 1),
-      intensity: round(g.netTonnes / Math.max(g.weightTonnes, 0.001), 3),
+
+  // (b) Gateway and sailing swaps — reach the same destination port through any
+  //     gateway whose sailing to it the workbook records.
+  for (const oceanEntry of oceanOptionsTo(s.destPort)) {
+    for (const routing of INLAND_ROUTINGS.get(oceanEntry.source) ?? []) {
+      const sameGateway = oceanEntry.source === s.gateway;
+      const sameSea = Math.abs(oceanEntry.distanceKm - s.oceanKm) < 0.5;
+      if (sameGateway && sameSea) continue; // that is the current route
+      const legs = [...costInlandRouting(routing, weight), costPerTonneKmLeg(oceanEntry, 'ocean', weight, 99)];
+      const railKm = sum(legs.filter((l) => l.mode === 'rail'), (l) => l.distanceKm);
+      const roadKm = sum(legs.filter((l) => l.mode === 'road'), (l) => l.distanceKm);
+      const seaDelta = s.oceanKm - oceanEntry.distanceKm;
+
+      // State only what actually changes, so the sentence is always true of the
+      // legs beside it: the inland swap, the sea distance, or both.
+      const inlandPart = sameGateway ? '' :
+        `Reaching ${oceanEntry.source} takes ${Math.round(roadKm)} km by road`
+        + `${railKm ? ` then ${Math.round(railKm)} km by rail` : ''}, against ${Math.round(s.roadKm)} km of road`
+        + `${s.railKm ? ` and ${Math.round(s.railKm)} km of rail` : ''} today. `
+        + `Road is charged ${EF.road} kg CO₂e per km whatever the load`
+        + `${railKm ? `, rail ${EF.rail} kg per tonne-km` : ''}. `;
+      const seaPart = Math.abs(seaDelta) < 0.5 ? `The sailing is unchanged at ${nf(oceanEntry.distanceKm)} km.`
+        : `${oceanEntry.source} → ${oceanEntry.dest} is ${nf(oceanEntry.distanceKm)} km against `
+          + `${nf(s.oceanKm)} km today — ${nf(Math.abs(seaDelta))} km ${seaDelta > 0 ? 'less' : 'more'} at sea.`;
+      const usedPart = ` The workbook already sails ${oceanEntry.source} → ${oceanEntry.dest} `
+        + `${oceanEntry.count} time${oceanEntry.count === 1 ? '' : 's'}`
+        + `${sameGateway ? '' : `, and runs that inland chain on ${routing.count} shipment${routing.count === 1 ? '' : 's'}`}.`;
+
+      add(finishOption(sameGateway ? 'shorter-sea' : 'gateway-swap', legs, oceanEntry.source, current, {
+        timesUsedInWorkbook: Math.min(oceanEntry.count, sameGateway ? oceanEntry.count : routing.count),
+        evidence: inlandPart + seaPart + usedPart,
+        evidenceRefs: uniq([
+          ...oceanEntry.refs.slice(0, 2),
+          ...routing.chain.map((k) => inlandCatalogue.get(k).refs[0]),
+        ]),
+      }));
+    }
+  }
+
+  // (c) Consolidation — the workbook's road factor is per truck run, so
+  //     same-day shipments through one gateway that fit one load can share it.
+  const group = truckGroups.get(`${s.date}|${s.gateway}|${s.status}`) ?? [];
+  const groupWeight = sum(group, (g) => g.weightTonnes);
+  if (group.length > 1 && groupWeight <= MAX_TRUCK_TONNES && s.roadCo2eTonnes > 0) {
+    const share = 1 / group.length;
+    const legs = s.legs.map((l) => (l.mode === 'road'
+      ? { ...l, co2eTonnes: r6(l.co2eTonnes * share), fuelLitres: Math.round((l.fuelLitres ?? 0) * share) }
+      : { ...l }));
+    add(finishOption('consolidate', legs, s.gateway, current, {
+      timesUsedInWorkbook: group.length,
+      evidence: `${group.length} shipments leave through ${s.gateway} on ${s.date} totalling ${wt(groupWeight)}, `
+        + `inside the ${MAX_TRUCK_TONNES.toFixed(1)} t heaviest load the workbook records. Road CO₂e is charged per truck `
+        + `run, so one run instead of ${group.length} splits it ${group.length} ways.`,
+      evidenceRefs: group.map((g) => g.sourceRef).slice(0, 4),
     }));
+  }
 
-  const yearAgg = (y) => {
-    const rows = shipments.filter((s) => s.year === y);
-    const gross = rows.reduce((s, r) => s + r.co2eGrossTonnes, 0);
-    const net = rows.reduce((s, r) => s + r.co2eTonnes, 0);
-    const w = rows.reduce((s, r) => s + r.weightTonnes, 0);
-    return { year: y, grossTonnes: round(gross, 1), netTonnes: round(net, 1), weightTonnes: round(w, 1), intensity: round(net / Math.max(w, 0.001), 3) };
-  };
-  const baseline = yearAgg(BASELINE_YEAR);
-  const latest = yearAgg(LATEST_YEAR);
-  // Program-attributed reduction: the avoided share in the latest year
-  // (gross vs net), NOT total intensity drift — mix/volume effects are shown
-  // separately in the emissions bridge and never claimed as program results.
-  const realizedPct = round(((latest.grossTonnes - latest.netTonnes) / Math.max(latest.grossTonnes, 0.001)) * 100, 1);
+  return options.sort((a, b) => (a.isCurrent ? -1 : b.isCurrent ? 1 : a.co2eTonnes - b.co2eTonnes));
+}
 
+const optionsById = new Map();
+enriched = enriched.map((s) => {
+  const options = buildOptions(s);
+  optionsById.set(s.shipmentId, options);
+  const best = options.find((o) => !o.isCurrent);
+  const avoidable = best ? -best.co2eDeltaTonnes : 0;
   return {
-    baselineYear: BASELINE_YEAR,
-    latestYear: LATEST_YEAR,
-    baseline,
-    latest,
-    realizedReductionPct: realizedPct,
-    ambitionPct: round(REDUCTION_AMBITION * 100, 0),
-    monthly,
-    methodology: {
-      formula: 'CO₂e (kg) = Weight (tonnes) × Distance (km) × Emission Factor (kg CO₂e / tonne-km)',
-      distance: 'Modeled distance: great-circle between validated coordinates × a mode-specific route factor (ocean 1.45 — shipping-route networks incl. canal transits; road 1.30; rail 1.25; air 1.05). Route-network distances (actual sailed/driven) are the planned upgrade path per ISO 14083.',
-      allocation: 'For shared/consolidated containers, CO₂e is attributed to each shipment by its weight share.',
-      factors: 'Versioned, well-to-wake (WTW) emission factors per GLEC Framework v3.1 / DEFRA 2025 defaults, mode- and distance-tiered. Factor set FY2026.1 is frozen for the reporting window; the full table with sources is on the Methodology page.',
-      scope: 'GHG Protocol Scope 3 — Category 9 (downstream transportation & distribution). Category 4 vs 9 allocation by freight payer (incoterms) is tracked per lane and under review for CIF/CFR sales.',
-    },
-    assumptions: [
-      'Distances are modeled (great-circle × mode route factor), not carrier-reported; route-network distances are the planned upgrade path.',
-      'Emission factor set FY2026.1 (WTW) held constant within the reporting window; carrier primary data to replace modeled defaults as coverage grows.',
-      'Realized reductions reflect pilot-lane actions from 2023-07 onward; the 10–20% target is a medium-term ambition, not a month-one guarantee.',
-      'Inventory totals are GROSS actuals; avoided emissions from interventions are tracked separately and never netted into the inventory.',
-    ],
+    ...s,
+    avoidableTonnes: r6(avoidable),
+    avoidablePct: s.co2eTonnes > 0 ? r3((avoidable / s.co2eTonnes) * 100) : 0,
+    bestOptionKind: best?.kind ?? null,
+    bestOptionLabel: best?.label ?? null,
   };
-}
+});
 
-// ── Pulse: "what changed" feed ──────────────────────────────────────────────
-function buildPulse(lanes, recs, shipments) {
-  const out = [];
+// ══════════════════════════════════════════════════════════════════════════
+// 5. Recommendations — one per shipment with a better evidenced option
+// ══════════════════════════════════════════════════════════════════════════
 
-  // Live (2026) shipments needing a decision now — the "live decisioning" hook.
-  const live = (shipments ?? []).filter((s) => s.status === 'In transit' || s.status === 'Planned');
-  const planned = live.filter((s) => s.status === 'Planned');
-  const inTransit = live.filter((s) => s.status === 'In transit');
-  if (planned.length)
-    out.push({ id: 'pulse-live-1', kind: 'live', region: 'All', intent: 'opportunity', summary: `${planned.length} shipments are being planned for this month — choose the mode before booking to lock in CO₂e savings.`, timestamp: tsHoursAgo(randInt(2, 10)) });
-  if (inTransit.length)
-    out.push({ id: 'pulse-live-2', kind: 'live', region: 'All', intent: 'neutral', summary: `${inTransit.length} shipments are in transit now — tracking actual vs expected transit and emissions.`, timestamp: tsHoursAgo(randInt(3, 14)) });
-  for (const s of planned.slice(0, 4)) {
-    out.push({ id: `pulse-live-${s.shipmentId}`, kind: 'live', laneId: s.laneId, region: s.region, intent: s.airException ? 'risk' : 'opportunity', summary: `Planned: ${s.customer} ${s.category} (${s.origin}→${s.destPort})${s.airException ? ' is set to fly — switch to ocean to cut CO₂e' : ' — confirm Best-for-CO₂ routing'}.`, timestamp: tsHoursAgo(randInt(1, 18)) });
-  }
+const COMPLEXITY = { 'gateway-swap': 'Medium', 'shorter-sea': 'Low', 'sea-instead-of-air': 'Medium', consolidate: 'Low' };
+const TITLE = {
+  'gateway-swap': (s, o) => (o.modePath.includes('Rail')
+    ? `Rail it out through ${o.gateway} instead of trucking to ${s.gateway}`
+    : `Route through ${o.gateway} instead of ${s.gateway}`),
+  'shorter-sea': (s, o) => `Book the shorter ${o.gateway} → ${s.destPort} sailing`,
+  'sea-instead-of-air': (s, o) => `Send this by sea through ${o.gateway} instead of flying`,
+  consolidate: (s) => `Put the ${s.date} ${s.gateway} loads on one truck`,
+};
 
-  const topLanes = lanes.slice(0, 14);
-  const kinds = [
-    (l) => ({ kind: 'recommendation', summary: `New reduction play on ${l.label} — up to ${l.reductionPotentialTonnes} t CO₂e/yr available.`, intent: 'opportunity' }),
-    (l) => ({ kind: 'air-exception', summary: `${l.customer} ${l.productCategory} flagged an air exception — review avoidability.`, intent: l.hasAirExceptions ? 'risk' : 'neutral' }),
-    (l) => ({ kind: 'reduction', summary: `${l.origin}→${l.destPort} realized a CO₂e cut after rail-inland switch.`, intent: 'positive' }),
-    (l) => ({ kind: 'hotspot', summary: `${l.label} entered the top-10 emitting lanes this quarter.`, intent: 'risk' }),
-    (l) => ({ kind: 'lsp', summary: `${l.lsp} intensity drifted above fleet average on ${l.destPort} lanes.`, intent: 'risk' }),
-    (l) => ({ kind: 'consolidation', summary: `${l.shipmentCount} ${l.customer} shipments are consolidation candidates.`, intent: 'opportunity' }),
-  ];
-  topLanes.forEach((l, i) => {
-    const make = kinds[i % kinds.length];
-    const e = make(l);
-    out.push({
-      id: `pulse-${String(i + 1).padStart(3, '0')}`,
-      laneId: l.laneId,
-      region: l.region,
-      ...e,
-      timestamp: tsHoursAgo(randInt(3, 70)),
-    });
+const recommendations = [];
+for (const s of enriched) {
+  const best = (optionsById.get(s.shipmentId) ?? []).find((o) => !o.isCurrent);
+  if (!best) continue;
+  const saving = -best.co2eDeltaTonnes;
+  const transitPhrase = best.transitDeltaDays === 0
+    ? 'no change to estimated transit'
+    : `about ${Math.abs(best.transitDeltaDays)} day${Math.abs(best.transitDeltaDays) === 1 ? '' : 's'} ${best.transitDeltaDays > 0 ? 'slower' : 'faster'}`;
+  recommendations.push({
+    id: `REC-${s.shipmentId}`,
+    laneId: s.laneId,
+    shipmentId: s.shipmentId,
+    laneLabel: `${s.origin} → ${s.destPort}`,
+    origin: s.origin,
+    gateway: s.gateway,
+    destPort: s.destPort,
+    region: s.region,
+    category: s.category,
+    type: best.kind,
+    optionKind: best.kind,
+    optionId: best.id,
+    title: TITLE[best.kind](s, best),
+    rationale: `${co2e(s.co2eTonnes)} → ${co2e(best.co2eTonnes)} CO₂e, saving ${co2e(saving)} `
+      + `(${Math.abs(best.co2eDeltaPct).toFixed(0)}%), with ${transitPhrase}.`,
+    proof: best.evidence,
+    proofRefs: best.evidenceRefs,
+    estCo2eSavingTonnes: r6(saving),
+    estCo2eSavingPct: r3(Math.abs(best.co2eDeltaPct)),
+    transitImpactDays: best.transitDeltaDays,
+    fromModePath: s.modePath,
+    toModePath: best.modePath,
+    complexity: COMPLEXITY[best.kind],
+    ownerPersona: 'logistics',
+    priorityScore: r6(saving),
+    status: 'suggested',
+    shipmentDate: s.date,
+    evidence: [
+      { label: 'CO₂e today', value: co2e(s.co2eTonnes) },
+      { label: 'On this option', value: co2e(best.co2eTonnes), comparison: `${co2e(saving)} saved` },
+      { label: 'Transit (est.)', value: `${best.transitDaysEst} days`, comparison: `${s.transitDaysEst} days today` },
+      { label: 'Already used on', value: `${best.timesUsedInWorkbook} shipment${best.timesUsedInWorkbook === 1 ? '' : 's'}` },
+    ],
   });
-  // A couple of program-level learning notes.
-  out.push({ id: 'pulse-901', kind: 'program', region: 'All', intent: 'positive', summary: `Recalibrated route dictionary — ${randInt(20, 60)} new lat/long pairs validated against Bing API.`, timestamp: tsDaysAgo(randInt(2, 6)) });
-  out.push({ id: 'pulse-902', kind: 'program', region: 'All', intent: 'neutral', summary: `${recs.length} reduction actions in the tracker; ${recs.filter((r) => r.controllability.startsWith('Direct')).length} are directly under Terova's control.`, timestamp: tsDaysAgo(randInt(1, 4)) });
-  return out.sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
+}
+recommendations.sort(byDesc((r) => r.priorityScore));
+
+// ══════════════════════════════════════════════════════════════════════════
+// 6. Lanes
+// ══════════════════════════════════════════════════════════════════════════
+
+const laneGroups = new Map();
+for (const s of enriched) laneGroups.set(s.laneId, [...(laneGroups.get(s.laneId) ?? []), s]);
+
+const lanes = [...laneGroups.entries()].map(([laneId, rows]) => {
+  const first = rows[0];
+  const co2e = sum(rows, (r) => r.co2eTonnes);
+  const weight = sum(rows, (r) => r.weightTonnes);
+  const tkm = sum(rows, (r) => r.totalDistanceKm * r.weightTonnes);
+  const years = uniq(rows.map((r) => r.reportingYear)).length;
+  const planned = rows.filter((r) => r.status === 'Planned');
+  const avoidable = sum(rows, (r) => r.avoidableTonnes);
+  const gateways = rank(rows.map((r) => r.gateway).filter(Boolean));
+  const gatewayName = gateways[0] ?? first.icd ?? first.origin;
+  const best = [...rows].sort(byDesc((r) => r.avoidableTonnes))[0];
+  return {
+    laneId,
+    label: first.stream === 'collection'
+      ? `${first.origin} → ${first.destPort} · first-mile collection`
+      : `${first.origin} → ${first.destPort} · ${first.category}`,
+    origin: first.origin,
+    destPort: first.destPort,
+    destCountry: first.destCountry,
+    market: first.market,
+    region: first.region,
+    category: first.category,
+    productForm: first.productForm,
+    gateways,
+    primaryGateway: gatewayName,
+    primaryMode: rank(rows.map((r) => r.primaryMode))[0],
+    // The most common *whole* path, kept in travel order. Ranking individual
+    // modes would emit nonsense like "Ocean → Road → Rail".
+    modePath: rank(rows.map((r) => r.modePath.join('>')))[0].split('>'),
+    hasAirFreight: rows.some((r) => r.isAirFreight),
+    airShipmentCount: rows.filter((r) => r.isAirFreight).length,
+    shipmentCount: rows.length,
+    plannedShipmentCount: planned.length,
+    totalWeightTonnes: r3(weight),
+    totalCo2eTonnes: r6(co2e),
+    annualCo2eTonnes: r6(co2e / Math.max(1, years)),
+    avgCo2ePerTonne: weight > 0 ? r4(co2e / weight) : 0,
+    avgCo2ePerTonneKm: tkm > 0 ? r3((co2e * 1e6) / tkm) : 0,
+    avgWeightTonnes: r3(weight / rows.length),
+    avoidableTonnes: r6(avoidable),
+    avoidablePct: co2e > 0 ? r3((avoidable / co2e) * 100) : 0,
+    plannedAvoidableTonnes: r6(sum(planned, (r) => r.avoidableTonnes)),
+    bestOptionKind: best.bestOptionKind,
+    bestOptionLabel: best.bestOptionLabel,
+    coords: { origin: coord(first.origin), gateway: coord(gatewayName), destPort: coord(first.destPort) },
+    _rows: rows,
+  };
+}).sort((a, b) => b.avoidableTonnes - a.avoidableTonnes || b.totalCo2eTonnes - a.totalCo2eTonnes);
+
+// ══════════════════════════════════════════════════════════════════════════
+// 7. Exceptions — everything odd that the workbook itself shows
+// ══════════════════════════════════════════════════════════════════════════
+
+const exceptions = [];
+
+for (const s of enriched.filter((x) => x.isAirFreight)) {
+  exceptions.push({
+    id: `EXC-AIR-${s.shipmentId}`,
+    kind: 'air',
+    severity: s.co2eTonnes > 1 ? 'High' : 'Medium',
+    shipmentId: s.shipmentId,
+    laneLabel: `${s.origin} → ${s.destPort}`,
+    region: s.region,
+    title: `${wt(s.weightTonnes)} flown to ${s.destPort}`,
+    detail: `${co2e(s.co2eTonnes)} CO₂e on ${s.date}. Air is charged at ${EF.air} kg CO₂e per tonne-km against `
+      + `${EF.ocean} at sea — ${Math.round(EF.air / EF.ocean)}× more for every tonne carried.`,
+    co2eTonnes: r6(s.co2eTonnes),
+    avoidableTonnes: r6(s.avoidableTonnes),
+    sourceRef: s.sourceRef,
+  });
 }
 
-// ── Exceptions / Air Watch + data quality ───────────────────────────────────
-function buildExceptions(shipments, lanes) {
-  const out = [];
-  let i = 0;
-  for (const s of shipments.filter((x) => x.airException)) {
-    i += 1;
-    out.push({
-      id: `exc-${String(i).padStart(3, '0')}`,
-      kind: 'air',
-      severity: s.airAvoidable ? 'High' : 'Medium',
-      shipmentId: s.shipmentId,
-      laneLabel: `${s.origin} → ${s.destPort}`,
-      customer: s.customer,
-      region: s.region,
-      title: `Air shipment — ${s.productName}`,
-      detail: s.airAvoidable
-        ? 'Avoidable: could have moved by ocean with earlier planning. Classify and shift.'
-        : 'Justified: genuine urgency / perishability. Govern and document.',
-      classification: s.airAvoidable ? 'Avoidable' : 'Justified',
-      co2eTonnes: s.co2eTonnes,
-      detectedAt: tsDaysAgo(randInt(1, 40)),
-    });
-  }
-  // Data-quality / blocked-route exceptions (mirrors the workbook's blocked rows).
-  const dq = [
-    { title: 'Blocked route — missing destination coordinates', detail: 'Konan / “confirm country/location” — destination lat/long ambiguous. Final CO₂e blocked until resolved.', region: 'APAC' },
-    { title: 'Invalid route — handled by external party', detail: 'Rail leg marked “shipment handled by external” with INVALID source/destination. Exclude or reassign.', region: 'All' },
-    { title: 'Low data confidence — weight share unconfirmed', detail: 'Consolidated container with unconfirmed weight allocation. Attributed CO₂e may shift on validation.', region: 'Europe' },
-  ];
-  dq.forEach((d, k) => {
-    out.push({
-      id: `exc-dq-${k + 1}`,
+// Dedicated truck runs for a fraction of a load — the road factor is per run.
+for (const s of enriched.filter((x) => x.stream === 'export' && !x.isAirFreight && x.weightTonnes < 1 && x.roadCo2eTonnes > 0)) {
+  exceptions.push({
+    id: `EXC-LOAD-${s.shipmentId}`,
+    kind: 'low-load',
+    severity: s.roadCo2eTonnes / s.co2eTonnes > 0.5 ? 'High' : 'Medium',
+    shipmentId: s.shipmentId,
+    laneLabel: `${s.origin} → ${s.destPort}`,
+    region: s.region,
+    title: `${wt(s.weightTonnes)} on a ${Math.round(s.roadKm)} km dedicated truck run`,
+    detail: `Road CO₂e is charged per truck run, so this ${wt(s.weightTonnes)} load carries the same `
+      + `${co2e(s.roadCo2eTonnes)} of road CO₂e that a full ${MAX_TRUCK_TONNES.toFixed(0)} t load would — `
+      + `${Math.round((s.roadCo2eTonnes / s.co2eTonnes) * 100)}% of this shipment's whole footprint.`,
+    co2eTonnes: r6(s.co2eTonnes),
+    avoidableTonnes: r6(s.avoidableTonnes),
+    sourceRef: s.sourceRef,
+  });
+}
+
+for (const year of src.years) {
+  (year.dataFlags ?? []).forEach((flag, i) => {
+    exceptions.push({
+      id: `EXC-DQ-${year.reportingYear}-${i + 1}`,
       kind: 'data-quality',
-      severity: 'Medium',
-      laneLabel: '—',
-      customer: '—',
-      region: d.region,
-      title: d.title,
-      detail: d.detail,
-      classification: 'Needs data',
-      co2eTonnes: 0,
-      detectedAt: tsDaysAgo(randInt(2, 30)),
+      severity: 'Low',
+      laneLabel: year.reportingYear,
+      region: 'All',
+      title: flag.kind === 'duplicate-inland-leg' ? 'Duplicated inland leg' : 'Two distances for one movement',
+      detail: flag.detail,
+      co2eTonnes: r6(flag.co2eTonnes ?? 0),
+      avoidableTonnes: 0,
+      sourceRef: flag.sourceRef,
     });
   });
-  void lanes;
-  return out.sort((a, b) => ({ High: 0, Medium: 1, Low: 2 }[a.severity] - { High: 0, Medium: 1, Low: 2 }[b.severity]));
 }
+exceptions.sort((a, b) => (b.avoidableTonnes || b.co2eTonnes) - (a.avoidableTonnes || a.co2eTonnes));
 
-// ── Emission-factor reference table (methodology page) ──────────────────────
-// Versioned, cited, well-to-wake (WTW) factor set. The set is frozen per
-// reporting window ("factorSet") so every number is reproducible at audit.
-const FACTOR_SET = { version: 'FY2026.1', basis: 'Well-to-wake (WTW)', validFrom: '2025-07-01', validTo: '2026-06-30' };
-const EMISSION_FACTORS = [
-  { id: 'AIR_SHORT', mode: 'Air', basis: 'Distance < 1000 km', value: 2.136, unit: 'kg CO₂e/tonne-km', source: 'GLEC Framework v3.1 (2025) — air freight default, WTW', note: 'Air exception — highest intensity.' },
-  { id: 'AIR_MED', mode: 'Air', basis: 'Distance 1000–3700 km', value: 1.323, unit: 'kg CO₂e/tonne-km', source: 'GLEC Framework v3.1 (2025) — air freight default, WTW', note: 'Air exception.' },
-  { id: 'AIR_LONG', mode: 'Air', basis: 'Distance > 3700 km', value: 1.191, unit: 'kg CO₂e/tonne-km', source: 'GLEC Framework v3.1 (2025) — air freight default, WTW', note: 'Air exception — long-haul. No RF uplift applied; under review.' },
-  { id: 'OCEAN_SHORT', mode: 'Ocean', basis: 'Distance < 1000 km', value: 0.016, unit: 'kg CO₂e/tonne-km', source: 'GLEC Framework v3.1 (2025) — container vessel default, WTW', note: 'Lowest-carbon long-haul mode.' },
-  { id: 'OCEAN_MED', mode: 'Ocean', basis: 'Distance 1000–3700 km', value: 0.012, unit: 'kg CO₂e/tonne-km', source: 'GLEC Framework v3.1 (2025) — container vessel default, WTW', note: '' },
-  { id: 'OCEAN_LONG', mode: 'Ocean', basis: 'Distance > 3700 km', value: 0.008, unit: 'kg CO₂e/tonne-km', source: 'GLEC Framework v3.1 (2025) — container vessel default, WTW', note: 'Best for long ocean legs.' },
-  { id: 'RAIL', mode: 'Rail', basis: 'All distances', value: 0.028, unit: 'kg CO₂e/tonne-km', source: 'GLEC Framework v3.1 (2025) — diesel freight rail default, WTW', note: 'Preferred inland mode.' },
-  { id: 'ROAD_TRUCK', mode: 'Road', basis: 'Full-load diesel truck', value: 0.088, unit: 'kg CO₂e/tonne-km', source: 'GLEC Framework v3.1 (2025) — articulated truck >20t, WTW', note: 'Primary road basis for cross-mode comparison.' },
-  { id: 'ROAD_VAN_KM', mode: 'Road', basis: 'Van (vehicle-km)', value: 0.835, unit: 'kg CO₂e/km', source: 'DEFRA 2025 GHG conversion factors — van class III, WTW', note: 'Vehicle-km basis — allocate by weight share.' },
-  { id: 'ROAD_PETROL_KM', mode: 'Road', basis: 'Petrol vehicle (vehicle-km)', value: 1.13, unit: 'kg CO₂e/km', source: 'DEFRA 2025 GHG conversion factors, WTW', note: 'Vehicle-km basis.' },
-  { id: 'ROAD_DIESEL_KM', mode: 'Road', basis: 'Diesel vehicle (vehicle-km)', value: 0.768, unit: 'kg CO₂e/km', source: 'DEFRA 2025 GHG conversion factors, WTW', note: 'Vehicle-km basis.' },
-  { id: 'FUEL_DIESEL', mode: 'Fuel', basis: 'Diesel (fuel-based)', value: 2.68, unit: 'kg CO₂e/litre', source: 'DEFRA 2025 — diesel (100% mineral), WTW', note: 'Fuel-based method — preferred where carrier fuel data exists (ISO 14083 primary data).' },
-].map((f) => ({ ...f, version: FACTOR_SET.version, factorBasis: FACTOR_SET.basis, validFrom: FACTOR_SET.validFrom, validTo: FACTOR_SET.validTo }));
+// ══════════════════════════════════════════════════════════════════════════
+// 8. Reference data, evidence and assumptions
+// ══════════════════════════════════════════════════════════════════════════
 
-// ── Copilot suggestions ─────────────────────────────────────────────────────
-const COPILOT_SUGGESTIONS = [
-  { id: 'cs-1', prompt: 'Where are my biggest emission hotspots?' },
-  { id: 'cs-2', prompt: 'Which lanes have the highest reduction potential?' },
-  { id: 'cs-3', prompt: 'Show me avoidable air shipments' },
-  { id: 'cs-4', prompt: 'What is our progress toward the 15% ambition?' },
-  { id: 'cs-5', prompt: 'Which LSP is above fleet-average intensity?' },
-  { id: 'cs-6', prompt: 'Recommend the best CO₂ actions this quarter' },
-  { id: 'cs-7', prompt: 'Which customers should we prioritize?' },
+const exportRows = enriched.filter((s) => s.stream === 'export');
+const delivered = enriched.filter((s) => s.status === 'Delivered');
+const planned = enriched.filter((s) => s.status === 'Planned');
+
+const emissionFactors = [
+  {
+    id: 'EF-ROAD', mode: 'Road', value: EF.road, unit: EF_UNIT.road, basis: EF_BASIS.road,
+    note: 'Charged per truck-kilometre, so a part load emits exactly what a full one does. This is what makes the gateway choice and truck sharing worth real tonnes.',
+    sourceRef: [...inlandCatalogue.values()].find((l) => l.mode === 'road').refs[0],
+  },
+  {
+    id: 'EF-RAIL', mode: 'Rail', value: EF.rail, unit: EF_UNIT.rail, basis: EF_BASIS.rail,
+    note: 'Charged per tonne-kilometre, so a light load travels almost free next to a dedicated truck.',
+    sourceRef: [...inlandCatalogue.values()].find((l) => l.mode === 'rail')?.refs[0] ?? '',
+  },
+  {
+    id: 'EF-OCEAN', mode: 'Ocean', value: EF.ocean, unit: EF_UNIT.ocean, basis: EF_BASIS.ocean,
+    note: 'Applied to every sailing in the workbook, whatever the container size.',
+    sourceRef: [...oceanCatalogue.values()][0].refs[0],
+  },
+  {
+    id: 'EF-AIR', mode: 'Air', value: EF.air, unit: EF_UNIT.air, basis: EF_BASIS.air,
+    note: `${Math.round(EF.air / EF.ocean)}× the ocean factor for every tonne-kilometre.`,
+    sourceRef: [...airCatalogue.values()][0]?.refs[0] ?? '',
+  },
 ];
 
-
-// ── Write everything ─────────────────────────────────────────────────────────
-function writeJson(relPath, data) {
-  const full = join(OUT, relPath);
-  mkdirSync(dirname(full), { recursive: true });
-  writeFileSync(full, JSON.stringify(data));
-}
-
-function stripShipment(s) {
-  const { _scenarios, _vendor, _lsp, _product, _customer, co2eGrossTonnes, ...rest } = s;
-  void _vendor; void _lsp; void _product; void _customer; void _scenarios;
-  return { ...rest, co2eGrossTonnes };
-}
-
-const SHIPMENT_COUNT = 600;
-
-function main() {
-  rmSync(OUT, { recursive: true, force: true });
-  mkdirSync(OUT, { recursive: true });
-
-  // Distribute shipments evenly across years (mild volume growth) so annual
-  // totals reflect the per-shipment reduction ramp — not random per-year counts.
-  // 2026 is partial (to AS_OF), so it gets a half quota over Jan–Jun.
-  const fullYears = [];
-  for (let y = BASELINE_YEAR; y < LATEST_YEAR; y++) fullYears.push(y);
-  const growth = (i) => 1 + i * 0.03; // ~3%/yr volume growth
-  const weightSum = fullYears.reduce((s, _y, i) => s + growth(i), 0) + 0.5; // +0.5 for partial 2026
-  const baseN = SHIPMENT_COUNT / weightSum;
-  const periods = [];
-  fullYears.forEach((y, i) => {
-    const n = Math.round(baseN * growth(i));
-    for (let k = 0; k < n; k++) periods.push(`${y}-${String(randInt(1, 12)).padStart(2, '0')}`);
-  });
-  const n26 = Math.round(baseN * 0.5);
-  for (let k = 0; k < n26; k++) periods.push(`${LATEST_YEAR}-${String(randInt(1, 6)).padStart(2, '0')}`);
-  const shipments = periods.map((p) => buildShipment(p));
-  const lanes = buildLanes(shipments);
-  const laneByShipment = new Map();
-  for (const l of lanes) for (const sid of l._members) laneByShipment.set(sid, l.laneId);
-
-  // Forward schedule — project the next horizon from recent lane cadence.
-  const PLAN_HORIZON_DAYS = 100;
-  const recentCut = addDays(AS_OF_ISO, -180);
-  const planPool = shipments.filter((s) => s.date >= recentCut);
-  const pool = planPool.length ? planPool : shipments;
-  const plannedCount = Math.max(56, Math.round((pool.length / 180) * PLAN_HORIZON_DAYS));
-  const templateFor = new Map();
-  const planned = [];
-  for (let i = 0; i < plannedCount; i++) {
-    const template = pick(pool);
-    const date = addDays(AS_OF_ISO, randInt(2, PLAN_HORIZON_DAYS));
-    const p = buildPlannedShipment(template, date);
-    templateFor.set(p.shipmentId, template.shipmentId);
-    planned.push(p);
+const monthly = (() => {
+  const byPeriod = new Map();
+  for (const s of delivered) {
+    const hit = byPeriod.get(s.period) ?? { period: s.period, co2eTonnes: 0, weightTonnes: 0, tkm: 0 };
+    hit.co2eTonnes += s.co2eTonnes;
+    hit.weightTonnes += s.weightTonnes;
+    hit.tkm += s.weightTonnes * s.totalDistanceKm;
+    byPeriod.set(s.period, hit);
   }
-  const allShipments = [...shipments, ...planned];
-  const laneIdOf = (s) => laneByShipment.get(s.shipmentId) ?? laneByShipment.get(templateFor.get(s.shipmentId));
+  return [...byPeriod.values()].sort((a, b) => a.period.localeCompare(b.period)).map((p) => ({
+    period: p.period,
+    co2eTonnes: r6(p.co2eTonnes),
+    weightTonnes: r3(p.weightTonnes),
+    intensity: p.tkm > 0 ? r3((p.co2eTonnes * 1e6) / p.tkm) : 0,
+  }));
+})();
 
-  const recs = [...buildRecommendations(lanes), ...buildAirRecs(shipments, laneByShipment)].sort(
-    (a, b) => b.priorityScore - a.priorityScore,
+/**
+ * Bridge each tab's printed total to the total the app reports. Two tabs
+ * annotate their export road block "handled by external SP" and leave it out of
+ * the printed figure; the same tabs also re-list some of those runs inside the
+ * collection block, which the app must not count twice. Both adjustments are
+ * itemised so a reviewer can tie the numbers out.
+ */
+const evidenceYears = src.years.map((y) => {
+  const rows = enriched.filter((s) => s.reportingYear === y.reportingYear);
+  const dates = rows.map((r) => r.date).sort();
+  const allLegs = sum(rows, (r) => r.co2eTonnes);
+  const tkm = sum(rows, (r) => r.weightTonnes * r.totalDistanceKm);
+  const reported = y.reportedTotalCo2eTonnes;
+
+  const roadAttached = sum(
+    [...y.exportShipments, ...y.airShipments].flatMap((sh) => sh.inland).filter((l) => modeOfInlandRow(l) === 'road'),
+    (l) => l.co2e,
   );
-  const recsByLane = new Map();
-  const recsByShipment = new Map();
-  for (const r of recs) {
-    if (r.laneId) {
-      if (!recsByLane.has(r.laneId)) recsByLane.set(r.laneId, []);
-      recsByLane.get(r.laneId).push(r);
-    }
-    if (r.shipmentId) {
-      if (!recsByShipment.has(r.shipmentId)) recsByShipment.set(r.shipmentId, []);
-      recsByShipment.get(r.shipmentId).push(r);
+  const relisted = sum(y.exportFirstMileFromCollectionBlock ?? [], (r) => r.co2e);
+  const duplicates = sum((y.dataFlags ?? []).filter((f) => f.kind === 'duplicate-inland-leg'), (f) => f.co2eTonnes ?? 0);
+
+  const reconciliation = [{
+    label: `Total printed on tab ${y.tab}`,
+    co2eTonnes: r6(reported),
+    note: 'Cell D53, "Total M.TRANSPORT DOWNSTREAM".',
+  }];
+  if (y.reportedTotalExcludesExportRoad) {
+    reconciliation.push({
+      label: 'Add the export road legs the tab omits',
+      co2eTonnes: r6(roadAttached),
+      note: 'The tab annotates its export road block "handled by external SP, not valid as this is for the Ocean shipment" '
+        + 'and leaves it out of the printed total. Those runs still happened, so Tradewind counts them'
+        + `${duplicates > 0 ? ` — excluding ${r3(duplicates)} t on a row the workbook lists twice, which is filed under Exceptions instead` : ''}.`,
+    });
+    if (relisted > 0) {
+      reconciliation.push({
+        label: 'Less the same runs re-listed in the collection block',
+        co2eTonnes: r6(-relisted),
+        note: 'The collection block repeats some of those first-mile runs, and the printed total already includes them there. '
+          + 'Counting each movement once keeps the figure honest.',
+      });
     }
   }
+  reconciliation.push({
+    label: 'Tradewind reports',
+    co2eTonnes: r6(allLegs),
+    note: 'Every leg attributed to a shipment, counted once.',
+  });
 
-  // Per-shipment detail chunks (legs + calc breakdown + lane pointer).
-  for (const s of allShipments) {
-    const laneId = laneIdOf(s);
-    const ownRecs = [
-      ...(recsByShipment.get(s.shipmentId) ?? []),
-      ...(recsByLane.get(laneId) ?? []).filter((r) => !r.shipmentId),
-    ];
-    writeJson(`shipments/${s.shipmentId}.json`, {
-      ...stripShipment(s),
-      laneId,
-      legs: s._scenarios.current.legs,
-      scenarios: s._scenarios,
-      recommendations: ownRecs,
-      hasOpenRecommendation: ownRecs.length > 0,
-    });
-  }
-  // Per-lane detail chunks (full scenarios + member shipments + recs).
-  for (const l of lanes) {
-    writeJson(`lanes/${l.laneId}.json`, {
-      ...stripLane(l),
-      scenarios: l._scenarios,
-      recommendations: recsByLane.get(l.laneId) ?? [],
-      shipmentIds: l._members,
-    });
+  // The bridge must actually add up, or the build is lying about its own numbers.
+  const bridged = sum(reconciliation.slice(0, -1), (s) => s.co2eTonnes);
+  if (Math.abs(bridged - allLegs) > 0.005) {
+    throw new Error(`${y.reportingYear}: reconciliation bridge sums to ${bridged.toFixed(4)} but the app reports ${allLegs.toFixed(4)}`);
   }
 
-  const lightShipments = allShipments.map((s) => {
-    const { co2eGrossTonnes, ...rest } = stripShipment(s);
-    void co2eGrossTonnes;
-    return { ...rest, laneId: laneIdOf(s) };
+  return {
+    reportingYear: y.reportingYear,
+    tab: y.tab,
+    from: dates[0],
+    to: dates.at(-1),
+    allLegsCo2eTonnes: r6(allLegs),
+    reportedCo2eTonnes: r6(reported),
+    reconciliation,
+    reconciliationNote: Math.abs(allLegs - reported) < 0.005 ? null
+      : `Tradewind reports ${r3(allLegs)} t against the tab's printed ${r3(reported)} t. The tab leaves out its export `
+        + `road block as "handled by external SP"; adding those ${r3(roadAttached)} t back`
+        + `${relisted > 0 ? ` and removing the ${r3(relisted)} t the collection block re-lists` : ''} bridges the two exactly.`,
+    weightTonnes: r3(sum(rows, (r) => r.weightTonnes)),
+    shipments: rows.length,
+    intensity: tkm > 0 ? r3((allLegs * 1e6) / tkm) : 0,
+  };
+});
+const firstYear = evidenceYears[0];
+const lastYear = evidenceYears.at(-1);
+
+const ASSUMPTIONS = {
+  asOf: APP_TODAY,
+  company: 'Terova',
+  workbook: src.source.workbook,
+  scope: 'Scope 3 · Category 9 — Downstream transportation & distribution',
+  dataFrom: delivered.map((s) => s.date).sort()[0],
+  dataTo: LAST_DISPATCH,
+  reportingYears: src.years.map((y) => y.reportingYear),
+  latestReportingYear: lastYear.reportingYear,
+  totalCo2eTonnes: r6(sum(delivered, (s) => s.co2eTonnes)),
+  latestYearCo2eTonnes: lastYear.allLegsCo2eTonnes,
+  transitEstimate: {
+    note: 'The workbook records dispatch dates only, so transit is estimated from its distances. Every transit figure is marked "est." and no CO₂e depends on one.',
+    kmPerDay: TRANSIT.kmPerDay,
+    portDwellDays: TRANSIT.portDwellDays,
+  },
+  plannedBasis: `The workbook's last dispatch is ${LAST_DISPATCH}, so today is ${APP_TODAY} and the forward book is the `
+    + `FY23-24 July–September quarter rolled forward ${ROLL_DAYS} days. Product, weight, gateway, container and every `
+    + `distance are unchanged from the real shipment — only the dates move, and each planned row carries the cell range it came from.`,
+  notInWorkbook: [
+    'Customer and consignee — the workbook records destination ports, not who buys.',
+    'Vendor, processor, carrier and forwarder — no partner is named anywhere in it.',
+    'Freight cost — there is no monetary column, so options are compared on CO₂e and transit, not money.',
+    'Arrival dates — dispatch is the only date recorded.',
+  ],
+};
+
+const evidence = {
+  workbook: src.source.workbook,
+  workbookTitle: src.source.title,
+  baselineYear: firstYear.reportingYear,
+  latestYear: lastYear.reportingYear,
+  years: evidenceYears,
+  changeSinceBaselinePct: r3(((lastYear.allLegsCo2eTonnes - firstYear.allLegsCo2eTonnes) / firstYear.allLegsCo2eTonnes) * 100),
+  monthly,
+  methodology: {
+    formula: 'CO₂e (t) = distance (km) × emission factor ÷ 1,000, with weight (t) applied for rail, ocean and air.',
+    roadBasis: `Road is charged per truck run at ${EF.road} kg CO₂e/km regardless of load — the workbook's own basis.`,
+    distance: src.source.dataSourceNotes.filter((n) => /distance/i.test(n)).join(' '),
+    factors: `Road ${EF.road} kg/km · Rail ${EF.rail} · Ocean ${EF.ocean} · Air ${EF.air} kg per tonne-km, all as stated in the workbook.`,
+    scope: ASSUMPTIONS.scope,
+    boundary: 'First-mile collection from the growing regions, factory to inland depot, depot to gateway port, and the international sailing or flight.',
+  },
+  dataSourceNotes: src.source.dataSourceNotes,
+  assumptions: [
+    ASSUMPTIONS.transitEstimate.note,
+    ASSUMPTIONS.plannedBasis,
+    'Route options are only offered where the workbook records every leg they use, and each shows how many shipments already moved that way.',
+    "Region and market are derived from the workbook's destination port names; product form and Scoville rating are parsed from its item descriptions.",
+    `Route options use the FY23-24 inland network. Earlier tabs record the same run as both 21 km and 645 km to "Hyderabad", so they are read for history but not used to price alternatives.`,
+  ],
+};
+
+const filterOptions = {
+  regions: uniq(exportRows.map((s) => s.region)).sort(),
+  markets: uniq(exportRows.map((s) => s.market)).sort(),
+  categories: uniq(enriched.map((s) => s.category)).sort(),
+  modes: ['Road', 'Rail', 'Ocean', 'Air'],
+  destPorts: uniq(exportRows.map((s) => s.destPort)).sort(),
+  gateways: uniq(exportRows.map((s) => s.gateway).filter(Boolean)).sort(),
+  reportingYears: uniq(enriched.map((s) => s.reportingYear)),
+};
+
+const copilotSuggestions = [
+  { id: 'CS-1', prompt: 'What should I change on the shipments still to be planned?' },
+  { id: 'CS-2', prompt: 'Where is our transport CO₂e concentrated?' },
+  { id: 'CS-3', prompt: 'Why is the Chennai gateway heavier than Nhava Sheva?' },
+  { id: 'CS-4', prompt: 'What did air freight cost us in CO₂e?' },
+  { id: 'CS-5', prompt: 'How does the latest year compare with the baseline?' },
+];
+
+// ══════════════════════════════════════════════════════════════════════════
+// 9. Write
+// ══════════════════════════════════════════════════════════════════════════
+
+rmSync(OUT, { recursive: true, force: true });
+mkdirSync(join(OUT, 'shipments'), { recursive: true });
+mkdirSync(join(OUT, 'lanes'), { recursive: true });
+
+const write = (rel, data) => writeFileSync(join(OUT, rel), JSON.stringify(data));
+const OMIT = new Set(['legs', '_rows']);
+const light = (obj) => Object.fromEntries(Object.entries(obj).filter(([k]) => !OMIT.has(k)));
+
+write('shipments/index.json', { items: enriched.map(light) });
+for (const s of enriched) {
+  write(`shipments/${s.shipmentId}.json`, {
+    ...light(s),
+    legs: s.legs,
+    options: optionsById.get(s.shipmentId) ?? [],
+    recommendations: recommendations.filter((r) => r.shipmentId === s.shipmentId),
   });
-  const lightLanes = lanes.map(stripLane);
-
-  writeJson('shipments/index.json', { generatedAt: AS_OF.toISOString(), items: lightShipments });
-  writeJson('lanes/index.json', { generatedAt: AS_OF.toISOString(), items: lightLanes });
-  writeJson('recommendations.json', recs);
-  writeJson('hotspots.json', buildHotspots(shipments));
-  writeJson('partners.json', buildPartners(shipments, recs));
-  writeJson('evidence.json', buildEvidence(shipments));
-  writeJson('pulse.json', buildPulse(lanes, recs, allShipments));
-  writeJson('exceptions.json', buildExceptions(shipments, lanes));
-  writeJson('emission-factors.json', EMISSION_FACTORS);
-  writeJson('copilot-suggestions.json', COPILOT_SUGGESTIONS);
-  writeJson('geo.json', GEO);
-
-  const regions = [...new Set(shipments.map((s) => s.region))].sort();
-  const totalNet = round(shipments.reduce((s, r) => s + r.co2eTonnes, 0), 1);
-  writeJson('assumptions.json', {
-    asOf: AS_OF.toISOString().slice(0, 10),
-    company: 'Terova',
-    product: 'Tradewind',
-    baselineYear: BASELINE_YEAR,
-    latestYear: LATEST_YEAR,
-    ambitionPct: round(REDUCTION_AMBITION * 100, 0),
-    totalNetCo2eTonnes: totalNet,
-    scope: 'Scope 3 · Downstream Transportation',
-    planHorizonDays: PLAN_HORIZON_DAYS,
-    planHorizonEnd: addDays(AS_OF_ISO, PLAN_HORIZON_DAYS),
-    plannedShipmentCount: planned.length,
-  });
-
-  writeJson('filter-options.json', {
-    regions,
-    markets: [...new Set(shipments.map((s) => s.market))].sort(),
-    productCategories: [...new Set(shipments.map((s) => s.category))].sort(),
-    modes: ['Ocean', 'Air', 'Rail', 'Road'],
-    customers: [...new Set(shipments.map((s) => s.customer))].sort(),
-    vendors: VENDORS.map((v) => v.name).sort(),
-    lsps: LSPS.map((l) => l.name).sort(),
-    originPorts: [...new Set(shipments.map((s) => s.originPort))].sort(),
-    years: [...new Set(shipments.map((s) => s.year))].sort(),
-    approaches: ['optimal', 'balanced', 'best_co2'],
-  });
-
-  // Console summary
-  const byMode = lightShipments.reduce((a, s) => ((a[s.primaryMode] = (a[s.primaryMode] || 0) + 1), a), {});
-  console.log('Tradewind mock data generated →', OUT);
-  console.table(byMode);
-  console.log(
-    `shipments: ${shipments.length}, lanes: ${lanes.length}, recommendations: ${recs.length}, ` +
-      `air exceptions: ${shipments.filter((s) => s.airException).length}, total net CO₂e: ${totalNet} t`,
-  );
-  console.log(
-    `reduction potential (top lane): ${lanes[0].reductionPotentialTonnes} t/yr on ${lanes[0].label}`,
-  );
 }
 
-function stripLane(l) {
-  const { _scenarios, _members, ...rest } = l;
-  void _scenarios; void _members;
-  return rest;
+write('lanes/index.json', { items: lanes.map(light) });
+for (const lane of lanes) {
+  // Representative shipment: the one with the most at stake, else the heaviest.
+  const rep = [...lane._rows].sort((a, b) => b.avoidableTonnes - a.avoidableTonnes || b.weightTonnes - a.weightTonnes)[0];
+  write(`lanes/${lane.laneId}.json`, {
+    ...light(lane),
+    options: optionsById.get(rep.shipmentId) ?? [],
+    recommendations: recommendations.filter((r) => r.laneId === lane.laneId),
+    shipmentIds: lane._rows.map((r) => r.shipmentId),
+  });
 }
 
-main();
+write('recommendations.json', recommendations);
+write('exceptions.json', exceptions);
+write('emission-factors.json', emissionFactors);
+write('assumptions.json', ASSUMPTIONS);
+write('evidence.json', evidence);
+write('filter-options.json', filterOptions);
+write('geo.json', GEO);
+write('copilot-suggestions.json', copilotSuggestions);
+
+// ── Report ─────────────────────────────────────────────────────────────────
+const plannedRecs = recommendations.filter((r) => r.shipmentId?.startsWith('PLN'));
+console.log(`\nBuilt public/mock-data from ${src.source.workbook}`);
+console.log(`  shipments        ${enriched.length}  (${delivered.length} delivered · ${planned.length} to be planned)`);
+console.log(`  export           ${exportRows.length}  ·  first-mile collection ${enriched.length - exportRows.length}`);
+console.log(`  lanes            ${lanes.length}`);
+console.log(`  decisions        ${recommendations.length}  worth ${r3(sum(recommendations, (r) => r.estCo2eSavingTonnes))} t CO₂e`);
+console.log(`  · to be planned  ${plannedRecs.length}  worth ${r3(sum(plannedRecs, (r) => r.estCo2eSavingTonnes))} t CO₂e`);
+console.log(`  exceptions       ${exceptions.length}`);
+console.log(`  as of            ${APP_TODAY}  (last workbook dispatch ${LAST_DISPATCH})`);
+for (const y of evidenceYears) {
+  console.log(`  ${y.reportingYear}  all legs ${String(r3(y.allLegsCo2eTonnes)).padStart(8)} t   `
+    + `workbook total ${String(r3(y.reportedCo2eTonnes)).padStart(8)} t   ${y.reconciliationNote ? 'differs (documented)' : 'exact match'}`);
+}
+const byKind = new Map();
+for (const r of recommendations) byKind.set(r.type, (byKind.get(r.type) ?? 0) + r.estCo2eSavingTonnes);
+console.log('  by option:', [...byKind.entries()].map(([k, v]) => `${k} ${r3(v)} t`).join(' · '));

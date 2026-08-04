@@ -1,23 +1,11 @@
-/** Geocoded place dictionary (origins, ports, destinations) for the world map. */
+/** Geocoded place dictionary for the map — every place named in the workbook. */
 export interface GeoPlace {
   lat: number;
   lon: number;
-  kind: 'origin' | 'port' | 'dest';
+  kind: 'origin' | 'icd' | 'gateway' | 'dest' | 'growing-region';
   country: string;
   state?: string;
   region?: string;
-  portCode?: string;
 }
 
 export type GeoDictionary = Record<string, GeoPlace>;
-
-/** Emission-factor reference row (methodology page). */
-export interface EmissionFactorRow {
-  id: string;
-  mode: string;
-  basis: string;
-  value: number;
-  unit: string;
-  source: string;
-  note: string;
-}

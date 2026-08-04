@@ -1,264 +1,367 @@
-import { useMemo, useState } from 'react';
-import { Box, Button, Card, CardContent, Chip, Divider, Snackbar, Stack, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material';
-import DownloadRoundedIcon from '@mui/icons-material/DownloadRounded';
+import { Box, Card, CardContent, Chip, Divider, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from '@mui/material';
+import { alpha } from '@mui/material/styles';
+import FactCheckRounded from '@mui/icons-material/FactCheckRounded';
 import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded';
-import WaterfallChartRoundedIcon from '@mui/icons-material/WaterfallChartRounded';
+import InfoRoundedIcon from '@mui/icons-material/InfoRounded';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { KpiCard } from '@/components/cards/KpiCard';
+import { ScopeNote } from '@/components/layout/ScopeNote';
 import { ChartContainer } from '@/components/charts/ChartContainer';
-import { ReductionTrendChart } from '@/components/charts/ReductionTrendChart';
-import { YearOverYearChart } from '@/components/charts/YearOverYearChart';
 import { MoMTrendChart } from '@/components/charts/MoMTrendChart';
-import { WaterfallChart, type WaterfallStep } from '@/components/charts/WaterfallChart';
-import { EquivalentsStrip } from '@/components/cards/EquivalentsStrip';
-import { KpiSkeleton, ChartSkeleton } from '@/components/loaders/Skeletons';
+import { KpiCard } from '@/components/cards/KpiCard';
+import { ChartSkeleton } from '@/components/loaders/Skeletons';
+import { SeverityChip, SourceRef } from '@/components/shared/Chips';
 import { useDataSource } from '@/hooks/useDataSource';
 import { useAsync } from '@/hooks/useAsync';
-import type { KpiMetric } from '@/types';
-import { formatPercent, formatPeriod, formatTonnes } from '@/utils/format';
-import { insightsForMonthOverMonth, insightsForReductionTrend, insightsForYearOverYear } from '@/utils/insights';
+import { useAppSelector } from '@/app/store/hooks';
+import { insightsForMonthlyTrend, insightsForReportingYears } from '@/utils/insights';
+import { formatDate, formatIntensity, formatNumber, formatPercent, formatTonnes } from '@/utils/format';
+import type { ReconciliationStep } from '@/types';
 
+/**
+ * The reporting surface: what Tradewind reports, how it ties back to the total
+ * the workbook itself prints, the methodology behind it, and the rows in the
+ * source data that need fixing.
+ */
 export default function EvidencePackPage() {
   const ds = useDataSource();
-  const { data: ev } = useAsync(() => ds.getEvidence(), []);
-  const { data: footprint } = useAsync(() => ds.getFootprint(), []);
+  const persona = useAppSelector((s) => s.persona.current);
+  const { data: evidence } = useAsync(() => ds.getEvidence(), []);
   const { data: factors } = useAsync(() => ds.getEmissionFactors(), []);
-  const { data: shipRes } = useAsync(() => ds.getShipments({ pageSize: 5000 }), []);
-  const [toast, setToast] = useState<string | null>(null);
-  const [trendView, setTrendView] = useState<'yoy' | 'mom'>('yoy');
-  // Clicking a YoY bar drills into that year's months.
-  const [momYear, setMomYear] = useState<number | null>(null);
-  // Month-over-month rows — gross monthly inventory tonnes; a drilled year
-  // shows exactly that year's months, otherwise the last 18.
-  const momRows = useMemo(() => {
-    const all = ev?.monthly ?? [];
-    const scoped = momYear ? all.filter((m) => m.period.startsWith(String(momYear))) : all.slice(-18);
-    return scoped.map((m) => ({ label: formatPeriod(m.period), value: m.grossTonnes }));
-  }, [ev, momYear]);
-  const drillIntoYear = (year: number) => {
-    setMomYear(year);
-    setTrendView('mom');
-  };
+  const { data: assumptions } = useAsync(() => ds.getAssumptions(), []);
+  const { data: footprint } = useAsync(() => ds.getFootprint({ persona }), [persona]);
+  const { data: exceptions } = useAsync(() => ds.getExceptions(), []);
 
-  // Data-quality mix — surfaces how much of the number rests on low-confidence rows.
-  const dq = useMemo(() => {
-    const items = shipRes?.items ?? [];
-    if (!items.length) return undefined;
-    const total = items.reduce((s, x) => s + x.co2eTonnes, 0);
-    const by = (level: string) => items.filter((x) => x.dataConfidence === level);
-    return (['High', 'Medium', 'Low'] as const).map((level) => {
-      const rows = by(level);
-      const co2e = rows.reduce((s, x) => s + x.co2eTonnes, 0);
-      return { level, count: rows.length, sharePct: total > 0 ? (co2e / total) * 100 : 0 };
-    });
-  }, [shipRes]);
+  if (!evidence || !assumptions) return <ChartSkeleton height={480} />;
 
-  // Real export: a downloadable JSON pack — methodology, factor snapshot,
-  // boundary, series, and the persisted decision ledger.
-  const exportPack = () => {
-    if (!ev) return;
-    const pack = {
-      title: 'Terova — Downstream Transportation (Scope 3 Cat 9) Evidence Pack',
-      generatedAt: new Date().toISOString(),
-      boundary: ev.methodology.scope,
-      methodology: ev.methodology,
-      assumptions: ev.assumptions,
-      emissionFactors: factors ?? 'load emission-factors.json',
-      baseline: ev.baseline,
-      latest: ev.latest,
-      realizedReductionPct: ev.realizedReductionPct,
-      ambitionPct: ev.ambitionPct,
-      monthlySeries: ev.monthly,
-      dataQualityMix: dq,
-    };
-    const blob = new Blob([JSON.stringify(pack, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `terova-evidence-pack-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setToast('Evidence pack downloaded — methodology, factor snapshot and monthly series');
-  };
-
-  // Emissions bridge: baseline gross → volume growth → efficiency/mode mix → program avoidance → latest net.
-  const bridge = useMemo(() => {
-    if (!ev) return undefined;
-    const baseIntensityPerTonne = ev.baseline.grossTonnes / Math.max(ev.baseline.weightTonnes, 1);
-    const volumeEffect = (ev.latest.weightTonnes - ev.baseline.weightTonnes) * baseIntensityPerTonne;
-    const efficiencyEffect = ev.latest.grossTonnes - ev.baseline.grossTonnes - volumeEffect;
-    const avoided = -(ev.latest.grossTonnes - ev.latest.netTonnes);
-    const steps: WaterfallStep[] = [
-      { label: `${ev.baselineYear} gross`, value: ev.baseline.grossTonnes, kind: 'start' },
-      { label: volumeEffect >= 0 ? 'Volume growth' : 'Volume decline', value: volumeEffect, kind: 'delta' },
-      { label: efficiencyEffect <= 0 ? 'Efficiency & mode mix' : 'Intensity drift', value: efficiencyEffect, kind: 'delta' },
-      { label: 'Avoided (program)', value: avoided, kind: 'delta' },
-      { label: `${ev.latestYear} net`, value: ev.latest.netTonnes, kind: 'end' },
-    ];
-    const insights = [
-      `Shipped volume ${volumeEffect >= 0 ? 'growth added' : 'decline removed'} ${formatTonnes(Math.abs(volumeEffect))} since ${ev.baselineYear} — the largest single driver of the bridge.`,
-      `${efficiencyEffect <= 0 ? 'Efficiency and mode mix removed' : 'Intensity drift added'} ${formatTonnes(Math.abs(efficiencyEffect))}, and the reduction program avoided a further ${formatTonnes(Math.abs(avoided))} in ${ev.latestYear}.`,
-      `Net result: ${formatTonnes(ev.baseline.grossTonnes)} gross in ${ev.baselineYear} → ${formatTonnes(ev.latest.netTonnes)} net in ${ev.latestYear}, with realized intensity reduction of ${formatPercent(ev.realizedReductionPct, 1)}.`,
-    ];
-    return { steps, insights };
-  }, [ev]);
-
-  const kpis: KpiMetric[] | undefined = ev && [
-    { id: 'base', label: `Baseline ${ev.baselineYear} (gross)`, value: ev.baseline.grossTonnes, unit: 'tonnes', display: formatTonnes(ev.baseline.grossTonnes), intent: 'neutral', hint: 'gross inventory basis' },
-    { id: 'latest', label: `Latest ${ev.latestYear} intensity`, value: ev.latest.intensity, unit: 'intensity', intent: 'neutral', hint: `vs ${ev.baseline.intensity} baseline` },
-    { id: 'realized', label: 'Program-attributed reduction', value: ev.realizedReductionPct, unit: 'percent', intent: 'positive', hint: 'avoided ÷ gross, latest year' },
-    { id: 'ambition', label: 'Medium-term ambition', value: ev.ambitionPct, unit: 'percent', intent: 'opportunity', hint: '10–20% target' },
-  ];
+  const latest = evidence.years.at(-1)!;
+  const baseline = evidence.years[0];
+  const dataIssues = (exceptions ?? []).filter((e) => e.kind === 'data-quality');
+  const cut = evidence.changeSinceBaselinePct < 0;
 
   return (
     <Box>
       <PageHeader
-        overline="Report · Evidence & Reporting Agent"
-        title="ESG Reporting"
-        subtitle="Report-ready, methodology-backed evidence of downstream-transport reduction for ESG and annual-report communication — baseline, realized reductions and the path to the ambition."
-        actions={
-          <Button variant="contained" startIcon={<DownloadRoundedIcon />} onClick={exportPack} disabled={!ev}>
-            Export pack
-          </Button>
-        }
+        overline="Report · Scope 3 downstream transportation"
+        title="Footprint &amp; Evidence"
+        subtitle={`Everything here comes from ${evidence.workbook}. Each reporting year is tied line by line to the total the workbook prints for that tab.`}
+        actions={<ScopeNote showFilters={false} />}
       />
 
-      <Box sx={{ mb: 3 }}>{kpis ? (
-        <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' } }}>
-          {kpis.map((m) => <KpiCard key={m.id} metric={m} />)}
-        </Box>
-      ) : <KpiSkeleton count={4} />}</Box>
-
-      {/* Emissions bridge — how the number moved from baseline to latest */}
-      <Box sx={{ mb: 3 }}>
-        <ChartContainer
-          title="Emissions bridge"
-          subtitle={ev ? `${ev.baselineYear} gross → growth, efficiency and program effects → ${ev.latestYear} net` : 'Baseline → drivers → latest net'}
-          icon={<WaterfallChartRoundedIcon sx={{ fontSize: 18 }} />}
-          insights={bridge?.insights}
-        >
-          {bridge ? <WaterfallChart data={bridge.steps} height={300} /> : <ChartSkeleton height={300} />}
-        </ChartContainer>
+      <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(4, 1fr)' }, mb: 3 }}>
+        <KpiCard
+          metric={{
+            id: 'latest',
+            label: `CO₂e · ${latest.reportingYear}`,
+            value: latest.allLegsCo2eTonnes,
+            unit: 'tonnes',
+            intent: 'neutral',
+            hint: `${latest.shipments} movements · ${formatDate(latest.from)} – ${formatDate(latest.to)}`,
+            icon: 'co2e',
+          }}
+        />
+        <KpiCard
+          metric={{
+            id: 'change',
+            label: `Change since ${baseline.reportingYear}`,
+            value: evidence.changeSinceBaselinePct,
+            unit: 'percent',
+            display: formatPercent(evidence.changeSinceBaselinePct, 1),
+            intent: cut ? 'positive' : 'risk',
+            hint: `${formatTonnes(baseline.allLegsCo2eTonnes)} → ${formatTonnes(latest.allLegsCo2eTonnes)}`,
+            icon: 'evidence',
+          }}
+        />
+        <KpiCard
+          metric={{
+            id: 'intensity',
+            label: 'Intensity',
+            value: latest.intensity,
+            unit: 'intensity',
+            intent: 'neutral',
+            hint: `against ${formatIntensity(baseline.intensity)} in the baseline year`,
+            icon: 'lanes',
+          }}
+        />
+        <KpiCard
+          metric={{
+            id: 'avoidable',
+            label: 'Avoidable on proven routes',
+            value: footprint?.avoidableTonnes ?? 0,
+            unit: 'tonnes',
+            intent: 'opportunity',
+            hint: 're-costed on routings the workbook records',
+            icon: 'decisioning',
+          }}
+        />
       </Box>
 
-      <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', lg: '1.5fr 1fr' } }}>
+      <Stack spacing={3}>
+        {/* The audit bridge — the single most important thing on this page */}
         <ChartContainer
-          title="Downstream transportation CO₂e"
-          subtitle="Gross inventory (dashed) vs net after interventions — the gap is the evidenced intervention ledger, never netted into the inventory"
-          insights={ev ? insightsForReductionTrend(ev.monthly) : undefined}
+          title="Reconciliation to the workbook"
+          subtitle="From the total each tab prints, to the total Tradewind reports — every line read from the sheet"
+          icon={<FactCheckRounded sx={{ fontSize: 18 }} />}
         >
-          {ev ? <ReductionTrendChart data={ev.monthly} height={300} /> : <ChartSkeleton height={300} />}
+          <Stack spacing={2.5}>
+            {evidence.years.map((y) => (
+              <Box key={y.reportingYear}>
+                <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1, flexWrap: 'wrap' }} useFlexGap>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                    {y.reportingYear}
+                  </Typography>
+                  <Chip size="small" variant="outlined" label={`tab ${y.tab}`} sx={{ fontFamily: 'monospace' }} />
+                  <Typography variant="caption" color="text.secondary">
+                    {formatDate(y.from)} – {formatDate(y.to)} · {y.shipments} movements
+                  </Typography>
+                  {y.reconciliationNote === null ? (
+                    <Chip
+                      size="small"
+                      icon={<CheckCircleRoundedIcon sx={{ fontSize: 15, color: 'inherit !important' }} />}
+                      label="Ties exactly"
+                      sx={{ ml: 'auto', fontWeight: 700, color: 'success.dark', bgcolor: (t) => alpha(t.palette.success.main, 0.14) }}
+                    />
+                  ) : (
+                    <Chip
+                      size="small"
+                      icon={<InfoRoundedIcon sx={{ fontSize: 15, color: 'inherit !important' }} />}
+                      label="Bridged below"
+                      sx={{ ml: 'auto', fontWeight: 700, color: 'warning.dark', bgcolor: (t) => alpha(t.palette.warning.main, 0.16) }}
+                    />
+                  )}
+                </Stack>
+                <BridgeTable steps={y.reconciliation} />
+                {y.reconciliationNote && (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75, lineHeight: 1.55 }}>
+                    {y.reconciliationNote}
+                  </Typography>
+                )}
+              </Box>
+            ))}
+          </Stack>
         </ChartContainer>
 
-        <Stack spacing={2.5}>
+        <Box sx={{ display: 'grid', gap: 3, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' } }}>
+          <ChartContainer
+            title="Reported footprint by year"
+            subtitle="The workbook's own Jul–Jun reporting windows"
+            insights={footprint ? insightsForReportingYears(footprint.byReportingYear) : undefined}
+          >
+            <MoMTrendChart
+              data={evidence.years.map((y) => ({ label: y.reportingYear, value: y.allLegsCo2eTonnes }))}
+              height={260}
+              zoomable={false}
+            />
+          </ChartContainer>
+
+          <ChartContainer
+            title="Monthly CO₂e"
+            subtitle="Every month the workbook covers"
+            insights={insightsForMonthlyTrend(evidence.monthly)}
+          >
+            <MoMTrendChart
+              data={evidence.monthly.map((m) => ({ label: m.period, value: m.co2eTonnes }))}
+              height={260}
+            />
+          </ChartContainer>
+        </Box>
+
+        {/* Emission factors, with the basis spelled out */}
+        <ChartContainer title="Emission factors" subtitle="As stated in the workbook — the basis is what matters most">
+          <Box sx={{ overflowX: 'auto' }}>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Mode</TableCell>
+                  <TableCell align="right">Factor</TableCell>
+                  <TableCell>Charged</TableCell>
+                  <TableCell>What that means</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {(factors ?? []).map((f) => (
+                  <TableRow key={f.id}>
+                    <TableCell sx={{ fontWeight: 700 }}>{f.mode}</TableCell>
+                    <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                      {f.value} <Box component="span" sx={{ color: 'text.secondary', fontSize: 11 }}>{f.unit}</Box>
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        color={f.basis === 'per-truck-km' ? 'warning' : 'default'}
+                        label={f.basis === 'per-truck-km' ? 'per truck run' : 'per tonne carried'}
+                      />
+                    </TableCell>
+                    <TableCell sx={{ color: 'text.secondary', fontSize: 13 }}>
+                      {f.note}
+                      <SourceRef refs={[f.sourceRef]} />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Box>
+        </ChartContainer>
+
+        <Box sx={{ display: 'grid', gap: 3, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' } }}>
+          {/* Methodology */}
           <Card>
             <CardContent>
-              <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>
-                Reduction journey
+              <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>
+                Methodology
               </Typography>
               <Stack spacing={1.25}>
-                <Journey label={`Baseline gross (${ev?.baselineYear ?? '—'})`} value={ev ? formatTonnes(ev.baseline.grossTonnes) : '—'} />
-                <Journey label={`Latest year gross (${ev?.latestYear ?? '—'})`} value={ev ? formatTonnes(ev.latest.grossTonnes) : '—'} />
-                <Journey label="Program-attributed reduction" value={ev ? `${ev.realizedReductionPct}%` : '—'} accent />
-                <Journey label="Medium-term ambition" value={ev ? `${ev.ambitionPct}%` : '—'} />
+                <Fact label="Calculation" value={evidence.methodology.formula} />
+                <Fact label="Road basis" value={evidence.methodology.roadBasis} />
+                <Fact label="Factors" value={evidence.methodology.factors} />
+                <Fact label="Distances" value={evidence.methodology.distance} />
+                <Fact label="Boundary" value={evidence.methodology.boundary} />
+                <Fact label="Scope" value={evidence.methodology.scope} />
               </Stack>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.5 }}>
-                The 10–20% target is a structured journey, not a month-one guarantee — early improvement of ~2% was the realistic start.
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 0.75 }}>
+                The workbook's own data-source notes
               </Typography>
+              <Stack spacing={0.5}>
+                {evidence.dataSourceNotes.map((n, i) => (
+                  <Typography key={i} variant="caption" color="text.secondary">
+                    {n}
+                  </Typography>
+                ))}
+              </Stack>
             </CardContent>
           </Card>
-        </Stack>
-      </Box>
 
-      <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', lg: '1.5fr 1fr' }, mt: 3 }}>
-        <ChartContainer
-          title={trendView === 'yoy' ? 'Year-over-year' : momYear ? `Month-over-month · ${momYear}` : 'Month-over-month'}
-          subtitle={trendView === 'yoy' ? 'Total CO₂e (bars) vs intensity (line) · click a year for its months' : undefined}
-          insights={trendView === 'yoy' ? (footprint ? insightsForYearOverYear(footprint.byYear) : undefined) : momRows.length ? insightsForMonthOverMonth(momRows) : undefined}
-          action={
-            <Stack direction="row" spacing={1} alignItems="center">
-              {trendView === 'mom' && momYear && (
-                <Chip size="small" color="primary" variant="outlined" label={`Months of ${momYear}`} onDelete={() => setMomYear(null)} />
-              )}
-              <ToggleButtonGroup size="small" exclusive value={trendView} onChange={(_, v) => v && setTrendView(v)} sx={{ '& .MuiToggleButton-root': { py: 0.25, px: 1.25, textTransform: 'none', fontWeight: 600 } }}>
-                <ToggleButton value="yoy">YoY</ToggleButton>
-                <ToggleButton value="mom">MoM</ToggleButton>
-              </ToggleButtonGroup>
-            </Stack>
-          }
-        >
-          {trendView === 'yoy' ? (
-            footprint ? <YearOverYearChart data={footprint.byYear} height={260} onYearClick={drillIntoYear} /> : <ChartSkeleton height={260} />
-          ) : momRows.length ? (
-            <MoMTrendChart data={momRows} height={260} />
-          ) : (
-            <ChartSkeleton height={260} />
-          )}
-        </ChartContainer>
-        {footprint && <EquivalentsStrip tonnes={footprint.annualCo2eTonnes} title={`Annual footprint (${formatTonnes(footprint.annualCo2eTonnes)}/yr) in tangible terms`} />}
-      </Box>
-
-      {ev && (
-        <Card sx={{ mt: 3 }}>
-          <CardContent>
-            <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>
-              Methodology
-            </Typography>
-            <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: 'action.hover', mb: 2 }}>
-              <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 600 }}>
-                {ev.methodology.formula}
+          {/* What is NOT in the workbook — stated up front rather than implied */}
+          <Card>
+            <CardContent>
+              <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 0.5 }}>
+                What this data does not contain
               </Typography>
-            </Box>
-            <Stack spacing={1.25}>
-              <MethodRow label="Distance" text={ev.methodology.distance} />
-              <MethodRow label="Allocation" text={ev.methodology.allocation} />
-              <MethodRow label="Emission factors" text={ev.methodology.factors} />
-              <MethodRow label="Scope" text={ev.methodology.scope} />
-            </Stack>
-            <Divider sx={{ my: 2 }} />
-            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-              Assumptions
-            </Typography>
-            <Stack spacing={0.75}>
-              {ev.assumptions.map((a, i) => (
-                <Stack key={i} direction="row" spacing={1} alignItems="flex-start">
-                  <CheckCircleRoundedIcon sx={{ fontSize: 16, color: 'primary.main', mt: 0.25 }} />
-                  <Typography variant="body2" color="text.secondary">
-                    {a}
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
+                Tradewind shows no dimension the workbook has no column for, so nothing on any screen is inferred about these.
+              </Typography>
+              <Stack spacing={1}>
+                {assumptions.notInWorkbook.map((n, i) => (
+                  <Stack key={i} direction="row" spacing={1} alignItems="flex-start">
+                    <Box sx={{ width: 5, height: 5, borderRadius: '50%', bgcolor: 'text.disabled', mt: 0.9, flexShrink: 0 }} />
+                    <Typography variant="body2" color="text.secondary">
+                      {n}
+                    </Typography>
+                  </Stack>
+                ))}
+              </Stack>
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
+                Stated assumptions
+              </Typography>
+              <Stack spacing={1}>
+                {evidence.assumptions.map((a, i) => (
+                  <Stack key={i} direction="row" spacing={1} alignItems="flex-start">
+                    <Box sx={{ width: 5, height: 5, borderRadius: '50%', bgcolor: 'primary.main', mt: 0.9, flexShrink: 0 }} />
+                    <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.55 }}>
+                      {a}
+                    </Typography>
+                  </Stack>
+                ))}
+              </Stack>
+            </CardContent>
+          </Card>
+        </Box>
+
+        {/* Data-quality findings — things to fix in the source */}
+        {dataIssues.length > 0 && (
+          <ChartContainer
+            title="Rows to fix in the source workbook"
+            subtitle="Found while rebuilding the shipments — each one is a place the sheet contradicts itself"
+          >
+            <Stack spacing={1.5}>
+              {dataIssues.map((e) => (
+                <Box key={e.id} sx={{ p: 1.5, borderRadius: 2, border: 1, borderColor: 'divider' }}>
+                  <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                    <SeverityChip severity={e.severity} />
+                    <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                      {e.title}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
+                      {e.laneLabel}
+                    </Typography>
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary">
+                    {e.detail}
                   </Typography>
-                </Stack>
+                  <SourceRef refs={[e.sourceRef]} />
+                </Box>
               ))}
             </Stack>
+          </ChartContainer>
+        )}
+
+        <Card>
+          <CardContent>
+            <Typography variant="caption" color="text.secondary">
+              Source: <b>{evidence.workbook}</b> — {evidence.workbookTitle}. Data covers{' '}
+              {formatDate(assumptions.dataFrom)} to {formatDate(assumptions.dataTo)} across{' '}
+              {assumptions.reportingYears.length} reporting years, {formatNumber(footprint?.shipmentCount ?? 0)} movements
+              in the current scope. The app treats {formatDate(assumptions.asOf)} as today — the day after the workbook closes.
+            </Typography>
           </CardContent>
         </Card>
-      )}
-
-      <Snackbar open={Boolean(toast)} autoHideDuration={3200} onClose={() => setToast(null)} message={toast ?? ''} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} />
+      </Stack>
     </Box>
   );
 }
 
-function Journey({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+/** The bridge as a signed running total, so it can be checked by eye. */
+function BridgeTable({ steps }: { steps: ReconciliationStep[] }) {
   return (
-    <Stack direction="row" justifyContent="space-between" alignItems="baseline">
-      <Typography variant="body2" color="text.secondary">
-        {label}
-      </Typography>
-      <Typography variant="body1" sx={{ fontWeight: 700, color: accent ? 'success.main' : 'text.primary' }}>
-        {value}
-      </Typography>
-    </Stack>
+    <Box sx={{ overflowX: 'auto' }}>
+      <Table size="small">
+        <TableBody>
+          {steps.map((s, i) => {
+            const last = i === steps.length - 1;
+            const first = i === 0;
+            const signed = !first && !last;
+            return (
+              <TableRow key={s.label} sx={last ? { '& td': { borderBottom: 0, borderTop: 2, borderTopStyle: 'solid', borderTopColor: 'divider' } } : undefined}>
+                <TableCell sx={{ width: '55%' }}>
+                  <Typography variant="body2" sx={{ fontWeight: last || first ? 700 : 500 }}>
+                    {s.label}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.45 }}>
+                    {s.note}
+                  </Typography>
+                </TableCell>
+                <TableCell align="right" sx={{ whiteSpace: 'nowrap', verticalAlign: 'top' }}>
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      fontWeight: last ? 800 : 600,
+                      fontVariantNumeric: 'tabular-nums',
+                      color: signed ? (s.co2eTonnes < 0 ? 'error.main' : 'warning.dark') : 'text.primary',
+                    }}
+                  >
+                    {signed && s.co2eTonnes > 0 ? '+' : ''}
+                    {s.co2eTonnes.toFixed(3)} t
+                  </Typography>
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </Box>
   );
 }
 
-function MethodRow({ label, text }: { label: string; text: string }) {
+function Fact({ label, value }: { label: string; value: string }) {
   return (
     <Box>
-      <Typography variant="caption" sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'primary.main' }}>
+      <Typography variant="caption" sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: 10.5, color: 'text.secondary', display: 'block' }}>
         {label}
       </Typography>
-      <Typography variant="body2" color="text.secondary">
-        {text}
+      <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.5 }}>
+        {value}
       </Typography>
     </Box>
   );

@@ -5,17 +5,19 @@ import { useAppSelector } from '@/app/store/hooks';
 import { personaHomePath } from '@/constants/nav';
 
 // Route-level code splitting: each page is its own lazy chunk.
-const ControlTowerPage = lazy(() => import('@/modules/decarbonization/pages/ControlTowerPage'));
+const DecisionsPage = lazy(() => import('@/modules/decarbonization/pages/DecisionsPage'));
 const HotspotsPage = lazy(() => import('@/modules/decarbonization/pages/HotspotsPage'));
-const ProductCustomerLanesPage = lazy(() => import('@/modules/decarbonization/pages/ProductCustomerLanesPage'));
-const PartnerInfluencePage = lazy(() => import('@/modules/decarbonization/pages/PartnerInfluencePage'));
+const LanesPage = lazy(() => import('@/modules/decarbonization/pages/LanesPage'));
 const EvidencePackPage = lazy(() => import('@/modules/decarbonization/pages/EvidencePackPage'));
 
-/** "/" lands on the first page the active persona's role can see. */
+/** "/" lands on the page the active persona's role starts from. */
 function PersonaHome() {
   const persona = useAppSelector((s) => s.persona.current);
   return <Navigate to={personaHomePath(persona)} replace />;
 }
+
+const TO_HOME = ['/overview', '/scope-1', '/scope-2', '/scope-3', '/methodology'];
+const TO_DECISIONS = ['/control-tower', '/shipments', '/decisioning', '/ledger', '/actions', '/planner', '/recommendations', '/scheduler'];
 
 export function AppRouter() {
   return (
@@ -23,26 +25,20 @@ export function AppRouter() {
       <Routes>
         <Route element={<AppShell />}>
           <Route path="/" element={<PersonaHome />} />
-          {/* Scope 3 downstream transportation is the whole product — old inventory routes fold into it */}
-          <Route path="/overview" element={<Navigate to="/" replace />} />
-          <Route path="/scope-1" element={<Navigate to="/control-tower" replace />} />
-          <Route path="/scope-2" element={<Navigate to="/control-tower" replace />} />
-          <Route path="/scope-3" element={<Navigate to="/control-tower" replace />} />
-          <Route path="/control-tower" element={<ControlTowerPage />} />
-          {/* Everything operational now lives in the Control Tower */}
-          <Route path="/shipments" element={<Navigate to="/control-tower" replace />} />
-          <Route path="/decisioning" element={<Navigate to="/control-tower" replace />} />
-          <Route path="/ledger" element={<Navigate to="/control-tower" replace />} />
-          <Route path="/actions" element={<Navigate to="/control-tower" replace />} />
-          <Route path="/planner" element={<Navigate to="/control-tower" replace />} />
-          <Route path="/recommendations" element={<Navigate to="/control-tower" replace />} />
-          <Route path="/scheduler" element={<Navigate to="/control-tower" replace />} />
+          <Route path="/decisions" element={<DecisionsPage />} />
           <Route path="/hotspots" element={<HotspotsPage />} />
-          <Route path="/lanes" element={<ProductCustomerLanesPage />} />
-          <Route path="/partners" element={<PartnerInfluencePage />} />
+          <Route path="/lanes" element={<LanesPage />} />
           <Route path="/evidence" element={<EvidencePackPage />} />
-          {/* Methodology & Factors removed from the product */}
-          <Route path="/methodology" element={<Navigate to="/" replace />} />
+
+          {/* Older paths fold into the four pages the workbook can support. */}
+          {TO_HOME.map((p) => (
+            <Route key={p} path={p} element={<Navigate to="/" replace />} />
+          ))}
+          {TO_DECISIONS.map((p) => (
+            <Route key={p} path={p} element={<Navigate to="/decisions" replace />} />
+          ))}
+          {/* Carrier & vendor performance is gone: the workbook names no partner. */}
+          <Route path="/partners" element={<Navigate to="/hotspots" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

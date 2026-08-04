@@ -26,13 +26,21 @@ import type { CopilotResult, PersonaId } from '@/types';
 
 /**
  * Suggested questions per persona — every one routes to an intent the assistant
- * can actually answer (progress, hotspots, air, partners, mode split, suggestions).
+ * can actually answer (decisions, gateways, air, hotspots, mode split, trend).
  */
 const PROMPTS_BY_PERSONA: Record<PersonaId, string[]> = {
-  cso: ['What is our progress toward the 15% ambition?', 'Where are my biggest hotspots?', 'Show me the mode split', 'Suggest the best CO₂ reductions'],
-  logistics: ['Which lanes can be reduced the most?', 'Show me avoidable air shipments', 'Show me the mode split', 'Suggest the best CO₂ reductions'],
-  analyst: ['Where are my biggest hotspots?', 'Which customers should we prioritize?', 'What is our progress toward the ambition?', 'Show me avoidable air shipments'],
-  procurement: ['Which partners can influence our footprint?', 'Show me vendor hotspots', 'Show me avoidable air shipments', 'Suggest the best CO₂ reductions'],
+  logistics: [
+    'What should I change on the shipments still to be planned?',
+    'Why is the Chennai gateway heavier than Nhava Sheva?',
+    'What did air freight cost us in CO₂e?',
+    'Where is our transport CO₂e concentrated?',
+  ],
+  cso: [
+    'How does the latest year compare with the baseline?',
+    'Where is our transport CO₂e concentrated?',
+    'What did air freight cost us in CO₂e?',
+    'Show me the mode split',
+  ],
 };
 
 let seq = 0;

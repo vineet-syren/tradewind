@@ -9,25 +9,36 @@ const currencyFmt = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 0,
 });
 
-/** Compact tonnes CO₂e: 12.3k t, 480 t, 6.2 t. */
-export function formatTonnes(value: number, dp = 1): string {
+/**
+ * Compact CO₂e: 12.3k t, 480 t, 6.2 t, 1.23 t, 420 kg.
+ *
+ * This dataset lives largely below one tonne per shipment, so anything under a
+ * tonne switches to kilograms rather than collapsing to "0.0 t" — a saving of
+ * 34 kg is real and must not read as nothing.
+ */
+export function formatTonnes(value: number): string {
   const abs = Math.abs(value);
   if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M t`;
   if (abs >= 10_000) return `${(value / 1000).toFixed(1)}k t`;
   if (abs >= 100) return `${Math.round(value)} t`;
-  return `${value.toFixed(dp)} t`;
+  if (abs >= 10) return `${value.toFixed(1)} t`;
+  if (abs >= 1) return `${value.toFixed(2)} t`;
+  if (abs === 0) return '0 kg';
+  if (abs >= 0.001) return `${numberFmt.format(Math.round(value * 1000))} kg`;
+  return `${(value * 1000).toFixed(2)} kg`;
 }
 
 export function formatTonnesFull(value: number): string {
   return `${numberFmt.format(Math.round(value))} t`;
 }
 
-/** Shipment weight in tonnes, keeping decimals for sub-ton (e.g. air) loads. */
+/** Shipment weight — kilograms below a tonne, where most of this book sits. */
 export function formatWeightTonnes(t: number): string {
   const abs = Math.abs(t);
   if (abs >= 100) return `${numberFmt.format(Math.round(t))} t`;
   if (abs >= 1) return `${t.toFixed(1)} t`;
-  return `${t.toFixed(2)} t`;
+  if (abs === 0) return '0 kg';
+  return `${numberFmt.format(Math.round(t * 1000))} kg`;
 }
 
 export function formatCurrency(value: number): string {

@@ -1,5 +1,5 @@
 import { brandTokens } from './theme';
-import { MODE_COLORS, APPROACH_COLORS } from '@/constants/app';
+import { MODE_COLORS, OPTION_COLORS } from '@/constants/app';
 
 /** Ordered categorical palette for charts. */
 export const CHART_PALETTE = [
@@ -21,6 +21,6 @@ export const SEVERITY_COLORS = {
   Low: brandTokens.low,
 } as const;
 
-export { MODE_COLORS, APPROACH_COLORS };
+export { MODE_COLORS, OPTION_COLORS };
 
 export const chartColor = (i: number): string => CHART_PALETTE[i % CHART_PALETTE.length];

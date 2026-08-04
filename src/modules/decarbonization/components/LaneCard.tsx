@@ -4,16 +4,15 @@ import ArrowForwardRoundedIcon from '@mui/icons-material/ArrowForwardRounded';
 import type { Lane } from '@/types';
 import { MODE_COLORS } from '@/constants/app';
 import { ModeIcon } from '@/components/layout/iconRegistry';
-import { ApproachChip } from '@/components/shared/Chips';
-import { formatTonnes } from '@/utils/format';
+import { formatTonnes, formatIntensity } from '@/utils/format';
 
-export type LaneRankKey = 'reduction' | 'co2e' | 'shipments' | 'pct';
+export type LaneRankKey = 'avoidable' | 'co2e' | 'shipments' | 'intensity';
 
 export function LaneCard({
   lane,
   onClick,
   selected = false,
-  rankBy = 'reduction',
+  rankBy = 'avoidable',
 }: {
   lane: Lane;
   onClick?: () => void;
@@ -22,10 +21,10 @@ export function LaneCard({
 }) {
   // All KPIs are always shown; the active "Rank by" one is highlighted.
   const kpis: { key: LaneRankKey; label: string; value: string }[] = [
-    { key: 'reduction', label: 'Savings / yr', value: formatTonnes(lane.realizableReductionTonnes) },
-    { key: 'pct', label: 'Reduction %', value: `${lane.reductionPotentialPct}%` },
+    { key: 'avoidable', label: 'Avoidable', value: formatTonnes(lane.avoidableTonnes) },
     { key: 'co2e', label: 'Total CO₂e', value: formatTonnes(lane.totalCo2eTonnes) },
-    { key: 'shipments', label: 'Shipments', value: `${lane.shipmentCount} · ${lane.annualFrequency}/yr` },
+    { key: 'shipments', label: 'Shipments', value: `${lane.shipmentCount}${lane.plannedShipmentCount ? ` · ${lane.plannedShipmentCount} ahead` : ''}` },
+    { key: 'intensity', label: 'Intensity', value: formatIntensity(lane.avgCo2ePerTonneKm) },
   ];
 
   return (
@@ -46,25 +45,25 @@ export function LaneCard({
               {lane.origin} <ArrowForwardRoundedIcon sx={{ fontSize: 13, verticalAlign: 'middle', color: 'text.disabled' }} /> {lane.destPort}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              {lane.productCategory} · {lane.customer}
+              {lane.category} · {lane.market}
             </Typography>
           </Box>
-          <Stack direction="row" spacing={0.5} alignItems="center">
-            {lane.hasAirExceptions && <Chip size="small" color="error" variant="outlined" label="Air" sx={{ height: 20 }} />}
-            <ApproachChip kind={lane.recommendedApproach} />
+          <Stack direction="row" spacing={0.5} alignItems="center" sx={{ flexShrink: 0 }}>
+            {lane.hasAirFreight && <Chip size="small" color="error" variant="outlined" label="Air" sx={{ height: 20 }} />}
+            {lane.plannedShipmentCount > 0 && <Chip size="small" color="primary" label={`${lane.plannedShipmentCount} to plan`} sx={{ height: 20, fontWeight: 700 }} />}
           </Stack>
         </Stack>
 
         <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 1 }}>
-          {lane.modePath.map((m2, i) => (
-            <ModeIcon key={i} mode={m2} sx={{ fontSize: 15, color: MODE_COLORS[m2] }} />
+          {lane.modePath.map((m, i) => (
+            <ModeIcon key={i} mode={m} sx={{ fontSize: 15, color: MODE_COLORS[m] }} />
           ))}
           <Typography variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
             {lane.modePath.join(' → ')}
+            {lane.gateways.length ? ` · via ${lane.gateways.join(' / ')}` : ''}
           </Typography>
         </Stack>
 
-        {/* All KPIs shown; the ranked one is spotlighted */}
         <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0.75, mt: 1.25 }}>
           {kpis.map((k) => {
             const active = k.key === rankBy;
@@ -79,7 +78,15 @@ export function LaneCard({
                   border: (t) => `1px solid ${active ? alpha(t.palette.primary.main, 0.35) : t.palette.divider}`,
                 }}
               >
-                <Typography sx={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: active ? 'primary.main' : 'text.secondary' }}>
+                <Typography
+                  sx={{
+                    fontSize: 9,
+                    fontWeight: 700,
+                    letterSpacing: '0.04em',
+                    textTransform: 'uppercase',
+                    color: active ? 'primary.main' : 'text.secondary',
+                  }}
+                >
                   {k.label}
                 </Typography>
                 <Typography variant="subtitle2" sx={{ fontWeight: 700, lineHeight: 1.15, color: active ? 'primary.main' : 'text.primary' }}>

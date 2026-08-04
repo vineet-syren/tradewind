@@ -1,141 +1,118 @@
-import {
-  Box,
-  Chip,
-  Dialog,
-  DialogContent,
-  DialogTitle,
-  Divider,
-  IconButton,
-  Stack,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableRow,
-  Typography,
-} from '@mui/material';
+import { Box, Dialog, DialogContent, DialogTitle, IconButton, Stack, Typography } from '@mui/material';
 import CloseRounded from '@mui/icons-material/CloseRounded';
 import type { ReactNode } from 'react';
 import { useDataSource } from '@/hooks/useDataSource';
 import { useAsync } from '@/hooks/useAsync';
-import { ModeIcon } from '@/components/layout/iconRegistry';
-import type { ApproachKind } from '@/types';
-import { APPROACH_LABEL, STATUS_LABEL } from '@/constants/app';
-import { formatTonnes, formatDistance, formatCurrency, formatNumber, formatWeightTonnes, formatIntensity, formatDate } from '@/utils/format';
-
-const STATUS_COLOR: Record<string, 'success' | 'warning' | 'info' | 'default'> = {
-  Delivered: 'success',
-  'In transit': 'warning',
-  Planned: 'info',
-};
+import { TableSkeleton } from '@/components/loaders/Skeletons';
+import { ModeChip, SourceRef, StatusChip } from '@/components/shared/Chips';
+import { LegTimeline } from '@/modules/decarbonization/components/LegTimeline';
+import { RouteOptionCard } from '@/modules/decarbonization/components/RouteOptionCard';
+import { formatTonnes, formatDistance, formatWeightTonnes, formatIntensity, formatDate, formatLitres } from '@/utils/format';
 
 function Fact({ label, value }: { label: string; value: ReactNode }) {
   return (
     <Box>
-      <Typography variant="caption" sx={{ color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: 10, display: 'block' }}>
+      <Typography
+        variant="caption"
+        sx={{ color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: 10, display: 'block' }}
+      >
         {label}
       </Typography>
-      <Typography variant="body2" sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{value}</Typography>
+      <Typography variant="body2" sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+        {value}
+      </Typography>
     </Box>
   );
 }
 
-/** Full per-shipment breakdown — opened by clicking a row in the ledger. */
+/** Full per-shipment breakdown — opened by clicking a row in the register. */
 export function ShipmentDetailDialog({ shipmentId, onClose }: { shipmentId: string | null; onClose: () => void }) {
   const ds = useDataSource();
-  const { data: s } = useAsync(() => (shipmentId ? ds.getShipment(shipmentId) : Promise.resolve(null)), [shipmentId]);
+  const { data: s, status } = useAsync(() => (shipmentId ? ds.getShipment(shipmentId) : Promise.resolve(null)), [shipmentId]);
   const open = Boolean(shipmentId);
+  const best = s?.options.find((o) => !o.isCurrent);
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      {s && (
+      {status === 'loading' && !s ? (
+        <DialogContent>
+          <TableSkeleton rows={6} />
+        </DialogContent>
+      ) : s ? (
         <>
           <DialogTitle sx={{ pr: 6 }}>
             <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-              <Typography variant="h6" sx={{ fontWeight: 700 }}>{s.origin} → {s.destPort}</Typography>
-              <Chip size="small" color={STATUS_COLOR[s.status] ?? 'default'} label={STATUS_LABEL[s.status] ?? s.status} />
-              <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>{s.shipmentId}</Typography>
+              <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                {s.origin} → {s.destPort}
+              </Typography>
+              <StatusChip status={s.status} />
+              <ModeChip mode={s.primaryMode} />
+              <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                {s.shipmentId}
+              </Typography>
             </Stack>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-              {s.productName} · {s.customer} · ships {formatDate(s.date)} → ETA {formatDate(s.eta)}
+              {s.productName} · {formatWeightTonnes(s.weightTonnes)} · dispatched {formatDate(s.date)} · {s.reportingYear}
             </Typography>
-            <IconButton onClick={onClose} sx={{ position: 'absolute', top: 12, right: 12 }} size="small"><CloseRounded /></IconButton>
+            <IconButton onClick={onClose} sx={{ position: 'absolute', top: 12, right: 12 }} size="small">
+              <CloseRounded />
+            </IconButton>
           </DialogTitle>
           <DialogContent dividers>
-            <Box sx={{ display: 'grid', gap: 1.75, gridTemplateColumns: { xs: 'repeat(2,1fr)', sm: 'repeat(4,1fr)' }, mb: 2 }}>
+            <Box sx={{ display: 'grid', gap: 1.75, gridTemplateColumns: { xs: 'repeat(2,1fr)', sm: 'repeat(4,1fr)' }, mb: 2.5 }}>
               <Fact label="CO₂e" value={formatTonnes(s.co2eTonnes)} />
               <Fact label="Intensity" value={formatIntensity(s.co2ePerTonneKm)} />
-              <Fact label="Weight" value={formatWeightTonnes(s.weightTonnes)} />
               <Fact label="Distance" value={formatDistance(s.totalDistanceKm)} />
-              <Fact label="Freight cost" value={formatCurrency(s.freightUsd)} />
-              <Fact label="Transit" value={`${s.transitDays} days`} />
-              <Fact label="Carrier" value={s.carrier} />
-              <Fact label="Vendor" value={s.vendor} />
-              <Fact label="Origin gateway" value={s.originPort} />
+              <Fact label="Transit (est.)" value={`${s.transitDaysEst} days`} />
+              <Fact label="Gateway" value={s.gateway ?? 'Flown out'} />
+              <Fact label="Depot" value={s.icd ?? '—'} />
+              <Fact label="Container" value={s.containerType ?? '—'} />
               <Fact label="Market" value={s.market} />
-              <Fact label="Mode path" value={s.modePath.join(' → ')} />
-              <Fact label="Data confidence" value={s.dataConfidence} />
+              <Fact label="Category" value={s.category} />
+              <Fact label="Scoville" value={s.shu ? `${s.shu.toLocaleString('en-US')} SHU` : '—'} />
+              <Fact label="Diesel" value={s.fuelLitres ? formatLitres(s.fuelLitres) : '—'} />
+              <Fact label="Mode chain" value={s.modePath.join(' → ')} />
             </Box>
 
-            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>Legs</Typography>
-            <Box sx={{ overflowX: 'auto', mb: 2 }}>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Mode</TableCell>
-                    <TableCell>From → To</TableCell>
-                    <TableCell align="right">Distance</TableCell>
-                    <TableCell align="right">EF</TableCell>
-                    <TableCell align="right">CO₂e</TableCell>
-                    <TableCell align="right">Fuel</TableCell>
-                    <TableCell align="right">Transit</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {s.legs.map((l) => (
-                    <TableRow key={l.seq}>
-                      <TableCell><Stack direction="row" spacing={0.75} alignItems="center"><ModeIcon mode={l.modeLabel} fontSize="small" />{l.modeLabel}</Stack></TableCell>
-                      <TableCell>{l.from} → {l.to}</TableCell>
-                      <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{formatDistance(l.distanceKm)}</TableCell>
-                      <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{l.emissionFactor.toFixed(3)}</TableCell>
-                      <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{formatTonnes(l.co2eTonnes)}</TableCell>
-                      <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{formatNumber(l.fuelLitres)} L</TableCell>
-                      <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{l.transitDaysExpected}d</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+            {s.derivedFromRef && (
+              <Box sx={{ p: 1.25, borderRadius: 1.5, bgcolor: 'action.hover', mb: 2.5 }}>
+                <Typography variant="caption" sx={{ fontWeight: 700, display: 'block' }}>
+                  Still to be planned
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Rolled forward from a real shipment one year earlier — same product, weight, gateway and distances, with only
+                  the dates moved.
+                </Typography>
+                <SourceRef refs={[s.derivedFromRef]} label="Derived from" />
+              </Box>
+            )}
+
+            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
+              Legs &amp; calculation
+            </Typography>
+            <Box sx={{ mb: 2.5 }}>
+              <LegTimeline legs={s.legs} />
             </Box>
 
             <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-              {s.status === 'Planned' ? 'Route & mode options' : 'Route taken'}
+              {s.options.length > 1 ? 'Route options the workbook evidences' : 'Route as recorded'}
             </Typography>
-            {/* Shipped/in-transit shipments only show the executed route — alternatives are a scheduled-only decision aid. */}
-            <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', sm: 'repeat(2,1fr)' } }}>
-              {(s.status === 'Planned' ? (['current', 'best', 'balanced', 'optimal'] as const) : (['current'] as const)).map((k) => {
-                const sc = s.scenarios[k];
-                if (!sc) return null;
-                return (
-                  <Box key={k} sx={{ border: 1, borderColor: 'divider', borderRadius: 1.5, p: 1.25 }}>
-                    <Typography variant="caption" sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'text.secondary' }}>
-                      {s.status === 'Planned' ? APPROACH_LABEL[sc.kind as ApproachKind] ?? sc.label : 'As shipped'}
-                    </Typography>
-                    <Stack direction="row" spacing={2} sx={{ mt: 0.5, fontVariantNumeric: 'tabular-nums' }}>
-                      <Typography variant="body2"><strong>{formatTonnes(sc.co2eTonnes)}</strong> CO₂e</Typography>
-                      <Typography variant="body2" color="text.secondary">{formatCurrency(sc.freightUsd)}</Typography>
-                      <Typography variant="body2" color="text.secondary">{sc.transitDays}d</Typography>
-                    </Stack>
-                  </Box>
-                );
-              })}
+            <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr', sm: 'repeat(2,1fr)' } }}>
+              {s.options.map((o) => (
+                <RouteOptionCard key={o.id} option={o} recommended={!o.isCurrent && o.id === best?.id} compact />
+              ))}
             </Box>
-            <Divider sx={{ my: 1.5 }} />
-            <Typography variant="caption" color="text.secondary">
-              Tip: the ledger reflects your current filters and date range — click any row for this breakdown.
-            </Typography>
+            {s.options.length === 1 && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.5 }}>
+                No alternative appears here because the workbook records no other routing that would reach this destination for
+                less. Options are never invented.
+              </Typography>
+            )}
+
+            <SourceRef refs={[s.sourceRef]} />
           </DialogContent>
         </>
-      )}
+      ) : null}
     </Dialog>
   );
 }

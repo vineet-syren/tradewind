@@ -1,4 +1,4 @@
-/** A ranked emission hotspot row (by product, customer, port, mode, etc.). */
+/** A ranked emission hotspot row (by product, port, gateway, mode, etc.). */
 export interface HotspotRow {
   key: string;
   label: string;
@@ -6,17 +6,10 @@ export interface HotspotRow {
   weightTonnes: number;
   shipments: number;
   co2ePerTonne: number;
-  /** True transport intensity — g CO₂e per tonne-kilometre. */
+  /** Transport intensity — g CO₂e per tonne-kilometre. */
   co2ePerTonneKm: number;
-}
-
-export interface CustomerModeRow {
-  customer: string;
-  Ocean: number;
-  Rail: number;
-  Road: number;
-  Air: number;
-  total: number;
+  /** CO₂e avoidable here on workbook-evidenced options. */
+  avoidableTonnes: number;
 }
 
 export interface MonthModeRow {
@@ -37,7 +30,7 @@ export interface RegionModeRow {
   total: number;
 }
 
-/** A directed CO₂e flow between two stages (origin → mode, mode → region) for sankey views. */
+/** A directed CO₂e flow between two stages (gateway → mode → region) for sankey views. */
 export interface FlowRow {
   from: string;
   to: string;
@@ -45,16 +38,14 @@ export interface FlowRow {
 }
 
 export interface Hotspots {
-  byProductCategory: HotspotRow[];
-  byCustomer: HotspotRow[];
+  byCategory: HotspotRow[];
   byMarket: HotspotRow[];
   byMode: HotspotRow[];
-  byOriginPort: HotspotRow[];
+  byGateway: HotspotRow[];
   byDestPort: HotspotRow[];
-  byVendor: HotspotRow[];
-  byLsp: HotspotRow[];
-  byOrigin: HotspotRow[];
-  customerModeMatrix: CustomerModeRow[];
+  byProduct: HotspotRow[];
+  /** First-mile collection runs, by growing region — the workbook's inbound block. */
+  byCollectionOrigin: HotspotRow[];
   monthlyByMode: MonthModeRow[];
   regionModeMatrix: RegionModeRow[];
   flows: FlowRow[];
@@ -62,12 +53,10 @@ export interface Hotspots {
 
 /** Dimension keys that map to a `HotspotRow[]` ranking (for the self-service view). */
 export type HotspotDimension =
-  | 'byProductCategory'
-  | 'byCustomer'
+  | 'byCategory'
   | 'byMarket'
   | 'byMode'
-  | 'byOriginPort'
+  | 'byGateway'
   | 'byDestPort'
-  | 'byVendor'
-  | 'byLsp'
-  | 'byOrigin';
+  | 'byProduct'
+  | 'byCollectionOrigin';

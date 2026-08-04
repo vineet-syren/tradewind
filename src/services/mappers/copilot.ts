@@ -1,9 +1,10 @@
 /**
- * Prompt-to-action copilot. Grounds a natural-language answer in the scoped
- * footprint and renders the right view + executable actions. Pure keyword
- * routing (no LLM) — deterministic and offline.
+ * Prompt-to-answer copilot. Grounds every reply in the scoped workbook figures
+ * and renders the matching view. Pure keyword routing (no LLM) — deterministic,
+ * offline, and it says so when it cannot answer rather than guessing.
  */
 import type {
+  Assumptions,
   CopilotAction,
   CopilotResult,
   EsgEvidence,
@@ -19,170 +20,220 @@ export interface CopilotContext {
   footprint: Footprint;
   lanes: Lane[];
   recommendations: Recommendation[];
+  /** Decisions on freight that has not shipped yet. */
+  openRecommendations: Recommendation[];
   hotspots: Hotspots;
   exceptions: ExceptionItem[];
   evidence: EsgEvidence;
+  assumptions: Assumptions;
   personaName: string;
 }
 
 const actionFromRec = (r: Recommendation): CopilotAction => ({
   id: `ca-${r.id}`,
-  label: `Suggestion: ${r.title}`,
+  label: r.title,
   type: r.type,
   laneId: r.laneId,
   shipmentId: r.shipmentId,
   recommendationId: r.id,
-  ownerPersona: r.ownerPersona,
   savingTonnes: r.estCo2eSavingTonnes,
 });
 
+const sumSaving = (recs: Recommendation[]) => recs.reduce((s, r) => s + r.estCo2eSavingTonnes, 0);
+
 export function composeCopilotReply(prompt: string, ctx: CopilotContext): CopilotResult {
   const q = prompt.toLowerCase();
-  const { footprint: f, lanes, recommendations: recs, hotspots, evidence } = ctx;
-  // Whole-word matching — "fair"/"dairy" must NOT trigger the 'air' branch.
-  // Word-boundary matching so "fair" never triggers 'air' — with an optional
-  // plural/possessive tail so "partners", "carriers", "lanes" still match.
+  const { footprint: f, lanes, openRecommendations: open, recommendations: recs, hotspots, evidence, exceptions } = ctx;
+  // Word-boundary matching so "fair" never triggers 'air', with an optional
+  // plural tail so "lanes", "ports", "options" still match.
   const has = (...words: string[]) =>
     words.some((w) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:s|es|'s)?\\b`, 'i').test(q));
 
-  // ── Air exceptions ─────────────────────────────────────────────────────
-  if (has('air', 'avoidable', 'exception')) {
-    const airRecs = recs.filter((r) => r.type === 'air-avoidance');
-    const avoidable = airRecs.filter((r) => r.airAvoidable);
-    const saving = airRecs.reduce((s, r) => s + r.estCo2eSavingTonnes, 0);
+  // ── What should I change / decisions ───────────────────────────────────
+  if (has('change', 'decision', 'decide', 'plan', 'planned', 'action', 'recommend', 'do next', 'should i')) {
+    const top = open.slice(0, 6);
+    const saving = sumSaving(open);
+    if (!open.length) {
+      return {
+        headline: 'Nothing is waiting on a decision',
+        answer: `Every shipment in the forward book is already on the lowest-carbon route the workbook can evidence. The historical record still shows ${formatTonnes(sumSaving(recs))} that could have been avoided — useful as a target, but not a decision you can still make.`,
+        insights: [{ label: 'Open decisions', value: '0', intent: 'positive' }],
+        view: { kind: 'none' },
+        actions: [],
+        followups: ['Where is our transport CO₂e concentrated?', 'What did air freight cost us in CO₂e?'],
+      };
+    }
     return {
-      headline: `${f.airExceptionCount} air shipments — ${f.airAvoidableCount} look avoidable`,
-      answer: `Air carries the highest CO₂e per tonne-km. ${f.airAvoidableCount} of ${f.airExceptionCount} air shipments could shift to ocean with earlier planning, avoiding about ${formatTonnes(saving)}/yr. Justified ones should be governed against an air budget.`,
+      headline: `${open.length} decisions worth ${formatTonnes(saving)}`,
+      answer: `${open.length} shipment${open.length === 1 ? ' has' : 's have'} a lower-carbon option the workbook already proves works. Taking all of them saves ${formatTonnes(saving)} — ${formatPercent((saving / Math.max(f.totalCo2eTonnes, 0.001)) * 100, 1)} of the footprint in scope. The biggest is ${top[0].title.toLowerCase()}, worth ${formatTonnes(top[0].estCo2eSavingTonnes)} on its own.`,
+      insights: [
+        { label: 'Open decisions', value: `${open.length}`, intent: 'opportunity' },
+        { label: 'CO₂e at stake', value: formatTonnes(saving), intent: 'opportunity' },
+        { label: 'Biggest single win', value: formatTonnes(top[0].estCo2eSavingTonnes), intent: 'positive' },
+      ],
+      view: { kind: 'recommendations', title: 'Decisions still open', recommendations: top },
+      actions: top.slice(0, 3).map(actionFromRec),
+      followups: ['Why is the Chennai gateway heavier than Nhava Sheva?', 'Where is our transport CO₂e concentrated?'],
+    };
+  }
+
+  // ── Air freight ────────────────────────────────────────────────────────
+  if (has('air', 'flown', 'fly', 'flight', 'plane')) {
+    const airRecs = recs.filter((r) => r.type === 'sea-instead-of-air');
+    const saving = sumSaving(airRecs);
+    if (!f.airShipmentCount) {
+      return {
+        headline: 'No air freight in this scope',
+        answer: 'None of the shipments in view flew. Widen the date range to see the three air shipments the workbook records.',
+        insights: [],
+        view: { kind: 'none' },
+        actions: [],
+        followups: ['Where is our transport CO₂e concentrated?', 'How does the latest year compare with the baseline?'],
+      };
+    }
+    return {
+      headline: `${f.airShipmentCount} shipments flew, costing ${formatTonnes(f.airCo2eTonnes)}`,
+      answer: `Air is charged at 1.58 kg CO₂e per tonne-kilometre against 0.0084 at sea — 188 times more for every tonne carried. Those ${f.airShipmentCount} shipments carried very little weight but produced ${formatTonnes(f.airCo2eTonnes)}, ${formatPercent((f.airCo2eTonnes / Math.max(f.totalCo2eTonnes, 0.001)) * 100, 1)} of the footprint in scope. The workbook already sails to the same countries, so ${formatTonnes(saving)} of that was avoidable on routes it has itself recorded.`,
       insights: [
         { label: 'Air CO₂e', value: formatTonnes(f.airCo2eTonnes), intent: 'risk' },
-        { label: 'Avoidable', value: `${avoidable.length} lanes`, intent: 'opportunity' },
-        { label: 'Saving if shifted', value: `${formatTonnes(saving)}/yr`, intent: 'positive' },
+        { label: 'Shipments flown', value: `${f.airShipmentCount}`, intent: 'risk' },
+        { label: 'Avoidable by sea', value: formatTonnes(saving), intent: 'opportunity' },
       ],
-      view: { kind: 'recommendations', title: 'Air-avoidance actions', recommendations: airRecs.slice(0, 6) },
+      view: { kind: 'recommendations', title: 'Sea alternatives the workbook records', recommendations: airRecs.slice(0, 6) },
       actions: airRecs.slice(0, 3).map(actionFromRec),
-      followups: ['Which lanes have the highest reduction potential?', 'Show me the ocean alternatives'],
+      followups: ['What should I change on the shipments still to be planned?', 'Where is our transport CO₂e concentrated?'],
     };
   }
 
-  // ── Progress / ambition / baseline ─────────────────────────────────────
-  if (has('progress', 'ambition', 'baseline', 'realized', 'target', '15%', '10-20')) {
+  // ── Gateways ───────────────────────────────────────────────────────────
+  if (has('gateway', 'chennai', 'nhava', 'port', 'rail', 'road', 'truck', 'inland')) {
+    const gatewayRecs = recs.filter((r) => r.type === 'gateway-swap');
+    const saving = sumSaving(gatewayRecs);
+    const byGateway = f.byGateway.slice(0, 4);
     return {
-      headline: `Realized ${formatPercent(f.realizedReductionPct)} of the ${f.ambitionPct}% ambition`,
-      answer: `Against the ${evidence.baselineYear} baseline, downstream-transport intensity is down ${formatPercent(evidence.realizedReductionPct)}. There is ${formatTonnes(f.reductionOpportunityTonnes)}/yr of realizable reduction identified (${formatPercent(f.reductionOpportunityPct)} of the annual footprint) — enough headroom to reach the ${f.ambitionPct}% medium-term ambition if the top lane actions are adopted.`,
+      headline: `The gateway choice is worth ${formatTonnes(saving)}`,
+      answer: `Road CO₂e is charged per truck run — 0.5928 kg per kilometre whatever is on the truck — while rail is charged per tonne-kilometre. Routing through Chennai means about 703 km of road; routing through Nhava Sheva means 51 km of road plus 702 km of rail. For a light load the difference is dramatic, and the workbook has already sailed both gateways to the same destination ports, so nothing here is hypothetical. Road legs account for ${formatTonnes(f.roadCo2eTonnes)} of the scope, ${formatPercent((f.roadCo2eTonnes / Math.max(f.totalCo2eTonnes, 0.001)) * 100, 0)} of the total.`,
       insights: [
-        { label: 'Realized', value: formatPercent(f.realizedReductionPct), intent: 'positive' },
-        { label: 'Opportunity', value: `${formatTonnes(f.reductionOpportunityTonnes)}/yr`, intent: 'opportunity' },
-        { label: 'Ambition', value: `${f.ambitionPct}%`, intent: 'neutral' },
+        { label: 'Road CO₂e in scope', value: formatTonnes(f.roadCo2eTonnes), intent: 'risk' },
+        { label: 'Gateway swaps found', value: `${gatewayRecs.length}`, intent: 'neutral' },
+        { label: 'Worth', value: formatTonnes(saving), intent: 'opportunity' },
       ],
-      view: {
-        kind: 'kpis',
-        title: 'Reduction progress',
-        kpis: [
-          { id: 'base', label: `Baseline ${evidence.baselineYear}`, value: evidence.baseline.netTonnes, unit: 'tonnes', intent: 'neutral' },
-          { id: 'latest', label: `Latest ${evidence.latestYear}`, value: evidence.latest.netTonnes, unit: 'tonnes', intent: 'neutral' },
-          { id: 'realized', label: 'Realized reduction', value: f.realizedReductionPct, unit: 'percent', intent: 'positive' },
-          { id: 'ambition', label: 'Ambition', value: f.ambitionPct, unit: 'percent', intent: 'opportunity' },
-        ],
-      },
-      actions: [],
-      followups: ['What are the top reduction actions?', 'Show me the ESG evidence pack'],
+      view: { kind: 'hotspots', title: 'CO₂e by gateway', hotspots: hotspots.byGateway.slice(0, 6) },
+      actions: gatewayRecs.slice(0, 3).map(actionFromRec),
+      followups: ['What should I change on the shipments still to be planned?', 'Where is our transport CO₂e concentrated?'],
+      ...(byGateway.length ? {} : {}),
     };
   }
 
-  // ── Partners (LSP / vendor) ────────────────────────────────────────────
-  if (has('lsp', 'carrier', 'partner', 'vendor', 'processor', 'fleet')) {
-    const partnerRecs = recs.filter((r) => r.type === 'lsp-swap' || r.type === 'vendor-intervention');
-    const saving = partnerRecs.reduce((s, r) => s + r.estCo2eSavingTonnes, 0);
-    return {
-      headline: `${formatTonnes(saving)}/yr is influenceable via partners`,
-      answer: `Terova outsources execution, so part of the reduction sits with vendors, processors and LSPs. ${partnerRecs.length} partner plays — greener-fleet LSP swaps and vendor governance on port/mode choice — total about ${formatTonnes(saving)}/yr of influenceable saving.`,
-      insights: [
-        { label: 'Partner actions', value: `${partnerRecs.length}`, intent: 'neutral' },
-        { label: 'Influenceable', value: `${formatTonnes(saving)}/yr`, intent: 'opportunity' },
-      ],
-      view: { kind: 'recommendations', title: 'Partner influence actions', recommendations: partnerRecs.slice(0, 6) },
-      actions: partnerRecs.slice(0, 3).map(actionFromRec),
-      followups: ['Which LSP is above fleet-average intensity?', 'Show me vendor hotspots'],
-    };
-  }
-
-  // ── Hotspots / biggest / customers ─────────────────────────────────────
-  if (has('hotspot', 'biggest', 'highest emit', 'where', 'concentration', 'customer', 'prioritize', 'priority')) {
-    const dim = has('customer', 'prioritize', 'priority') ? hotspots.byCustomer : hotspots.byProductCategory;
-    const title = dim === hotspots.byCustomer ? 'Top customers by CO₂e' : 'Top product categories by CO₂e';
+  // ── Hotspots / concentration ───────────────────────────────────────────
+  if (has('hotspot', 'biggest', 'where', 'concentrat', 'product', 'destination', 'market', 'prioritise', 'prioritize')) {
+    const dim = has('product') ? hotspots.byProduct : has('market', 'destination') ? hotspots.byDestPort : hotspots.byCategory;
+    const title = dim === hotspots.byProduct ? 'Top products by CO₂e'
+      : dim === hotspots.byDestPort ? 'Top destination ports by CO₂e'
+        : 'Top product categories by CO₂e';
     const top = dim[0];
+    if (!top) {
+      return {
+        headline: 'Nothing in scope',
+        answer: 'No shipments match the current filters, so there is nothing to rank. Clear a filter and ask again.',
+        insights: [],
+        view: { kind: 'none' },
+        actions: [],
+        followups: ['What should I change on the shipments still to be planned?'],
+      };
+    }
     return {
-      headline: `${top.label} is your largest hotspot`,
-      answer: `${top.label} accounts for ${formatTonnes(top.co2eTonnes)} across ${top.shipments} shipments. Your top-5 customers carry ${formatPercent(f.top5CustomerSharePct, 0)} of downstream CO₂e — concentration that makes a handful of lane interventions high-leverage.`,
+      headline: `${top.label} is the largest single source`,
+      answer: `${top.label} accounts for ${formatTonnes(top.co2eTonnes)} across ${top.shipments} shipment${top.shipments === 1 ? '' : 's'}. The top three destination ports carry ${formatPercent(f.top3DestSharePct, 0)} of downstream CO₂e — that concentration is what makes a handful of gateway decisions move the whole number.`,
       insights: [
         { label: 'Largest', value: top.label, intent: 'risk' },
         { label: 'Its CO₂e', value: formatTonnes(top.co2eTonnes), intent: 'risk' },
-        { label: 'Top-5 share', value: formatPercent(f.top5CustomerSharePct, 0), intent: 'neutral' },
+        { label: 'Top-3 port share', value: formatPercent(f.top3DestSharePct, 0), intent: 'neutral' },
       ],
       view: { kind: 'hotspots', title, hotspots: dim.slice(0, 8) },
       actions: [],
-      followups: ['Which lanes have the highest reduction potential?', 'Show me the mode split'],
+      followups: ['What should I change on the shipments still to be planned?', 'Why is the Chennai gateway heavier than Nhava Sheva?'],
     };
   }
 
   // ── Mode split ─────────────────────────────────────────────────────────
-  if (has('mode', 'ocean', 'split')) {
+  if (has('mode', 'ocean', 'sea', 'split')) {
     const ocean = f.modeSplit.find((m) => m.mode === 'Ocean');
     return {
       headline: `Ocean carries ${ocean ? formatPercent(ocean.pct, 0) : '—'} of CO₂e`,
-      answer: `Most movement is ocean-led, which is the lowest-carbon long-haul mode. The leverage is in the inland legs (road → rail) and in governing the small but carbon-heavy air exceptions.`,
-      insights: f.modeSplit.map((m) => ({ label: m.mode, value: formatPercent(m.pct, 0), intent: m.mode === 'Air' ? 'risk' : 'neutral' })),
+      answer: 'Most movement is ocean-led, which is the lowest-carbon long-haul option per tonne. That means the leverage is not in the sailing — it is in the inland legs, where road is charged per truck run, and in the handful of shipments that flew.',
+      insights: f.modeSplit.map((m) => ({
+        label: m.mode,
+        value: formatPercent(m.pct, 0),
+        intent: m.mode === 'Air' ? ('risk' as const) : ('neutral' as const),
+      })),
       view: { kind: 'modeSplit', title: 'CO₂e by mode', modeSplit: f.modeSplit },
       actions: [],
-      followups: ['Show me avoidable air shipments', 'Which lanes can shift road to rail?'],
+      followups: ['Why is the Chennai gateway heavier than Nhava Sheva?', 'What did air freight cost us in CO₂e?'],
     };
   }
 
-  // ── Recommendations / best actions (default-ish) ───────────────────────
-  if (has('recommend', 'action', 'best', 'reduce', 'reduction', 'lane', 'potential', 'this quarter', 'focus')) {
-    const top = recs.slice(0, 6);
-    const saving = top.reduce((s, r) => s + r.estCo2eSavingTonnes, 0);
+  // ── Trend / baseline / reporting ────────────────────────────────────────
+  if (has('year', 'trend', 'baseline', 'compare', 'reduce', 'reduction', 'progress', 'report', 'reconcile', 'evidence')) {
+    const first = evidence.years[0];
+    const last = evidence.years.at(-1)!;
+    const dq = exceptions.filter((e) => e.kind === 'data-quality').length;
     return {
-      headline: `Top ${top.length} actions save ${formatTonnes(saving)}/yr`,
-      answer: `The highest-priority reduction actions — weighted by CO₂e saving and confidence — are mostly rail-inland + ocean-heavy mode shifts and nearest-gateway re-routing. Executing the top ${top.length} captures about ${formatTonnes(saving)}/yr.`,
+      headline: `${formatTonnes(last.allLegsCo2eTonnes)} in ${last.reportingYear}, ${formatPercent(Math.abs(evidence.changeSinceBaselinePct), 1)} ${evidence.changeSinceBaselinePct < 0 ? 'below' : 'above'} ${first.reportingYear}`,
+      answer: `Downstream transport went from ${formatTonnes(first.allLegsCo2eTonnes)} in ${first.reportingYear} to ${formatTonnes(last.allLegsCo2eTonnes)} in ${last.reportingYear}${last.reconciliationNote ? '' : ', which ties exactly to the total the workbook prints for that tab'}. Volume matters as much as routing here, so read it alongside intensity: ${last.intensity} g CO₂e per tonne-kilometre in the latest year against ${first.intensity} in the baseline.${dq ? ` ${dq} row${dq === 1 ? '' : 's'} in the workbook contradict themselves and are listed under Exceptions.` : ''}`,
       insights: [
-        { label: 'Top actions', value: `${top.length}`, intent: 'neutral' },
-        { label: 'Combined saving', value: `${formatTonnes(saving)}/yr`, intent: 'opportunity' },
-        { label: 'Avg confidence', value: `${Math.round(top.reduce((s, r) => s + r.confidence, 0) / Math.max(top.length, 1))}%`, intent: 'positive' },
+        { label: first.reportingYear, value: formatTonnes(first.allLegsCo2eTonnes), intent: 'neutral' },
+        { label: last.reportingYear, value: formatTonnes(last.allLegsCo2eTonnes), intent: evidence.changeSinceBaselinePct < 0 ? 'positive' : 'risk' },
+        { label: 'Change', value: formatPercent(evidence.changeSinceBaselinePct, 1), intent: evidence.changeSinceBaselinePct < 0 ? 'positive' : 'risk' },
       ],
-      view: { kind: 'recommendations', title: 'Priority reduction actions', recommendations: top },
-      actions: top.slice(0, 3).map(actionFromRec),
-      followups: ['Show me avoidable air shipments', 'What is our progress to the ambition?'],
+      view: {
+        kind: 'kpis',
+        title: 'Reported footprint by year',
+        kpis: evidence.years.map((y) => ({
+          id: y.reportingYear,
+          label: y.reportingYear,
+          value: y.allLegsCo2eTonnes,
+          unit: 'tonnes' as const,
+          intent: 'neutral' as const,
+          hint: `${y.shipments} shipments · ${y.intensity} g/t·km`,
+        })),
+      },
+      actions: [],
+      followups: ['What should I change on the shipments still to be planned?', 'Where is our transport CO₂e concentrated?'],
     };
   }
 
-  // ── Footprint summary (recognised generic intents only) ────────────────
-  if (has('footprint', 'summary', 'overview', 'total', 'emission', 'emissions', 'co2', 'co₂e', 'carbon', 'how much')) {
+  // ── Footprint summary ──────────────────────────────────────────────────
+  if (has('footprint', 'summary', 'overview', 'total', 'emission', 'co2', 'co₂e', 'carbon', 'how much')) {
     return {
-      headline: `${formatTonnes(f.annualCo2eTonnes)}/yr downstream transport footprint`,
-      answer: `Terova's downstream transportation footprint is about ${formatTonnes(f.annualCo2eTonnes)}/yr across ${f.laneCount} lanes. ${formatTonnes(f.reductionOpportunityTonnes)}/yr (${formatPercent(f.reductionOpportunityPct)}) is realizable, with ${formatPercent(f.realizedReductionPct)} already realized against baseline. Ask about hotspots, lanes, air exceptions, partners or progress.`,
+      headline: `${formatTonnes(f.totalCo2eTonnes)} across ${f.shipmentCount} shipments`,
+      answer: `The scope in view holds ${formatTonnes(f.totalCo2eTonnes)} across ${f.shipmentCount} shipments on ${f.laneCount} lanes, at ${f.avgIntensity} g CO₂e per tonne-kilometre. ${formatTonnes(f.avoidableTonnes)} of it (${formatPercent(f.avoidablePct, 1)}) could have gone a lower-carbon way the workbook itself records. Ask about decisions, gateways, air freight, hotspots or the year-on-year trend.`,
       insights: [
-        { label: 'Annual CO₂e', value: `${formatTonnes(f.annualCo2eTonnes)}`, intent: 'neutral' },
-        { label: 'Opportunity', value: `${formatTonnes(f.reductionOpportunityTonnes)}/yr`, intent: 'opportunity' },
-        { label: 'Realized', value: formatPercent(f.realizedReductionPct), intent: 'positive' },
+        { label: 'CO₂e in scope', value: formatTonnes(f.totalCo2eTonnes), intent: 'neutral' },
+        { label: 'Avoidable', value: formatTonnes(f.avoidableTonnes), intent: 'opportunity' },
+        { label: 'Intensity', value: `${f.avgIntensity} g/t·km`, intent: 'neutral' },
       ],
       view: {
         kind: 'lanes',
-        title: 'Highest-potential lanes',
-        lanes: [...lanes].sort((a, b) => b.realizableReductionTonnes - a.realizableReductionTonnes).slice(0, 6),
+        title: 'Lanes with the most at stake',
+        lanes: [...lanes].sort((a, b) => b.avoidableTonnes - a.avoidableTonnes).slice(0, 6),
       },
       actions: [],
-      followups: ['Where are my biggest hotspots?', 'Recommend the best CO₂ actions', 'Show me avoidable air shipments'],
+      followups: ['What should I change on the shipments still to be planned?', 'Where is our transport CO₂e concentrated?', 'What did air freight cost us in CO₂e?'],
     };
   }
 
   // ── Honest fallback: never pretend to understand ───────────────────────
   return {
     headline: "I don't have a grounded answer for that",
-    answer: `I answer only from the shipment data in view, and I couldn't map "${prompt}" to a topic I cover — footprint, hotspots, lanes, air exceptions, carriers & vendors, mode split, or progress to the ambition. Try one of the prompts below, or rephrase around one of those topics.`,
+    answer: `I answer only from the ${ctx.assumptions.workbook} figures in view, and I could not map "${prompt}" onto something I hold — decisions, gateways, air freight, hotspots, mode split, or the year-on-year footprint. Try one of the prompts below.`,
     insights: [],
     view: { kind: 'none' },
     actions: [],
-    followups: ['Where are my biggest hotspots?', 'Recommend the best CO₂ actions', 'What is our progress toward the ambition?'],
+    followups: [
+      'What should I change on the shipments still to be planned?',
+      'Where is our transport CO₂e concentrated?',
+      'How does the latest year compare with the baseline?',
+    ],
   };
 }

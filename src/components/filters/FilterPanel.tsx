@@ -13,9 +13,11 @@ import { clearFilters, countActiveFilters, patchFilters } from '@/app/store/filt
 import type { ModeLabel } from '@/types';
 
 /**
- * Global filter bar — one single row (period + dimensions + search) with the
- * Clear button pinned outside the scroll area so it is always reachable.
- * Vendor / carrier / origin-port live behind "More" to keep the row sane.
+ * Global filter bar — one row (period + dimensions + search), Clear pinned
+ * outside the scroll area so it is always reachable.
+ *
+ * Every dimension here is a column the workbook records. Ports, gateway and
+ * reporting year live behind "More" to keep the row short.
  */
 export function FilterPanel({ showSearch = true }: { showSearch?: boolean }) {
   const ds = useDataSource();
@@ -37,7 +39,8 @@ export function FilterPanel({ showSearch = true }: { showSearch?: boolean }) {
   }, [filters.search]);
 
   const activeCount = countActiveFilters(filters);
-  const moreCount = (filters.vendors?.length ? 1 : 0) + (filters.lsps?.length ? 1 : 0) + (filters.originPorts?.length ? 1 : 0);
+  const moreCount =
+    (filters.gateways?.length ? 1 : 0) + (filters.reportingYears?.length ? 1 : 0) + (filters.destPorts?.length ? 1 : 0);
 
   if (!opts) return null;
 
@@ -65,10 +68,9 @@ export function FilterPanel({ showSearch = true }: { showSearch?: boolean }) {
             <FilterAltRoundedIcon fontSize="small" sx={{ color: 'primary.main', flexShrink: 0 }} />
             <DateRangeFilter value={{ dateFrom: filters.dateFrom, dateTo: filters.dateTo }} onChange={(patch) => dispatch(patchFilters(patch))} />
             <MultiSelectFilter label="Region" options={opts.regions} value={filters.regions ?? []} onChange={(v) => dispatch(patchFilters({ regions: v }))} width={138} />
-            <MultiSelectFilter label="Market" options={opts.markets} value={filters.markets ?? []} onChange={(v) => dispatch(patchFilters({ markets: v }))} width={138} />
-            <MultiSelectFilter label="Product" options={opts.productCategories} value={filters.productCategories ?? []} onChange={(v) => dispatch(patchFilters({ productCategories: v }))} width={148} />
+            <MultiSelectFilter label="Market" options={opts.markets} value={filters.markets ?? []} onChange={(v) => dispatch(patchFilters({ markets: v }))} width={150} />
+            <MultiSelectFilter label="Category" options={opts.categories} value={filters.categories ?? []} onChange={(v) => dispatch(patchFilters({ categories: v }))} width={166} />
             <MultiSelectFilter label="Mode" options={opts.modes} value={filters.modes ?? []} onChange={(v) => dispatch(patchFilters({ modes: v as ModeLabel[] }))} width={120} />
-            <MultiSelectFilter label="Customer" options={opts.customers} value={filters.customers ?? []} onChange={(v) => dispatch(patchFilters({ customers: v }))} width={150} />
             {showSearch && (
               <TextField
                 size="small"
@@ -83,24 +85,12 @@ export function FilterPanel({ showSearch = true }: { showSearch?: boolean }) {
           {/* Pinned controls — always visible regardless of horizontal scroll. */}
           <Stack direction="row" alignItems="center" spacing={0.5} sx={{ flexShrink: 0, pt: 1 }}>
             <Badge badgeContent={moreCount} color="primary">
-              <Button
-                size="small"
-                color="inherit"
-                startIcon={<TuneRoundedIcon />}
-                onClick={(e) => setMoreAnchor(e.currentTarget)}
-                sx={{ whiteSpace: 'nowrap' }}
-              >
+              <Button size="small" color="inherit" startIcon={<TuneRoundedIcon />} onClick={(e) => setMoreAnchor(e.currentTarget)} sx={{ whiteSpace: 'nowrap' }}>
                 More
               </Button>
             </Badge>
             {activeCount > 0 && (
-              <Button
-                size="small"
-                color="inherit"
-                startIcon={<ClearRoundedIcon />}
-                onClick={() => dispatch(clearFilters())}
-                sx={{ whiteSpace: 'nowrap' }}
-              >
+              <Button size="small" color="inherit" startIcon={<ClearRoundedIcon />} onClick={() => dispatch(clearFilters())} sx={{ whiteSpace: 'nowrap' }}>
                 Clear ({activeCount})
               </Button>
             )}
@@ -119,9 +109,9 @@ export function FilterPanel({ showSearch = true }: { showSearch?: boolean }) {
             MORE FILTERS
           </Typography>
           <Stack spacing={1.5}>
-            <MultiSelectFilter label="Vendor" options={opts.vendors} value={filters.vendors ?? []} onChange={(v) => dispatch(patchFilters({ vendors: v }))} width={264} />
-            <MultiSelectFilter label="Carrier / LSP" options={opts.lsps} value={filters.lsps ?? []} onChange={(v) => dispatch(patchFilters({ lsps: v }))} width={264} />
-            <MultiSelectFilter label="Origin port" options={opts.originPorts} value={filters.originPorts ?? []} onChange={(v) => dispatch(patchFilters({ originPorts: v }))} width={264} />
+            <MultiSelectFilter label="Destination port" options={opts.destPorts} value={filters.destPorts ?? []} onChange={(v) => dispatch(patchFilters({ destPorts: v }))} width={264} />
+            <MultiSelectFilter label="Gateway port" options={opts.gateways} value={filters.gateways ?? []} onChange={(v) => dispatch(patchFilters({ gateways: v }))} width={264} />
+            <MultiSelectFilter label="Reporting year" options={opts.reportingYears} value={filters.reportingYears ?? []} onChange={(v) => dispatch(patchFilters({ reportingYears: v }))} width={264} />
           </Stack>
         </Popover>
       </CardContent>

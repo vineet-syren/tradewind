@@ -15,27 +15,22 @@ export interface NavGroupDef {
 }
 
 /**
- * Role-based visibility — each persona sees only the pages their job needs:
- * - CSO: whole-network visibility + reporting (no day-to-day ops tower).
- * - Logistics lead: the operational tower + route/hotspot visibility.
- * - Program owner: hotspots, lanes and the ESG report they run monthly.
- * - Procurement: partners and the lanes their vendors/carriers run.
+ * Four pages, deliberately. The logistics lead lands on the decision queue; the
+ * CSO lands on the report. Hotspots and Lanes are the two "where is it" views
+ * both roles share.
  */
-// "Ask Tradewind" is no longer a page — it lives as a right-docked chat widget
-// (CopilotDock) available on every page, so it is intentionally absent here.
 export const NAV_GROUPS: NavGroupDef[] = [
   {
     heading: '',
     items: [
-      { label: 'Control Tower', to: '/control-tower', iconKey: 'atlas', personas: ['logistics'] },
-      { label: 'Emission Hotspots', to: '/hotspots', iconKey: 'hotspots', personas: ['cso', 'logistics'] },
-      { label: 'Customer & Product Lanes', to: '/lanes', iconKey: 'lanes', personas: ['cso', 'logistics', 'procurement'] },
-      { label: 'Carrier & Vendor Performance', to: '/partners', iconKey: 'partners', personas: ['procurement', 'logistics'] },
+      { label: 'Decisions', to: '/decisions', iconKey: 'decisioning', personas: ['logistics'] },
+      { label: 'Emission Hotspots', to: '/hotspots', iconKey: 'hotspots' },
+      { label: 'Lanes', to: '/lanes', iconKey: 'lanes' },
     ],
   },
   {
     heading: 'REPORT',
-    items: [{ label: 'ESG Reporting', to: '/evidence', iconKey: 'evidence', personas: ['cso'] }],
+    items: [{ label: 'Footprint & Evidence', to: '/evidence', iconKey: 'evidence' }],
   },
 ];
 
@@ -47,7 +42,14 @@ export function navGroupsForPersona(persona: PersonaId): NavGroupDef[] {
   })).filter((g) => g.items.length > 0);
 }
 
-/** The landing page for a persona — the first nav item their role can see. */
+/** Where each role should land: the lead on decisions, the CSO on the report. */
+const PERSONA_HOME: Record<PersonaId, string> = {
+  logistics: '/decisions',
+  cso: '/evidence',
+};
+
 export function personaHomePath(persona: PersonaId): string {
-  return navGroupsForPersona(persona)[0]?.items[0]?.to ?? '/lanes';
+  const home = PERSONA_HOME[persona];
+  const visible = navGroupsForPersona(persona).flatMap((g) => g.items.map((i) => i.to));
+  return visible.includes(home) ? home : (visible[0] ?? '/hotspots');
 }

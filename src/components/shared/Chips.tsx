@@ -1,9 +1,11 @@
 import { Box, Chip, Stack, Typography } from '@mui/material';
 import type { ChipProps } from '@mui/material';
 import { alpha } from '@mui/material/styles';
-import { MODE_COLORS, APPROACH_COLORS, APPROACH_LABEL } from '@/constants/app';
+import TrendingDownRoundedIcon from '@mui/icons-material/TrendingDownRounded';
+import { MODE_COLORS, OPTION_COLORS, STATUS_LABEL } from '@/constants/app';
 import { ModeIcon } from '@/components/layout/iconRegistry';
-import type { ApproachKind, Severity } from '@/types';
+import type { Severity } from '@/types';
+import { formatTonnes } from '@/utils/format';
 
 const SEVERITY_COLOR: Record<Severity, 'error' | 'warning' | 'success'> = {
   High: 'error',
@@ -32,25 +34,53 @@ export function ModeChip({ mode, size = 'small' }: { mode: string; size?: ChipPr
   );
 }
 
-export function ApproachChip({ kind, size = 'small' }: { kind: ApproachKind; size?: ChipProps['size'] }) {
-  const color = APPROACH_COLORS[kind] ?? '#6B7384';
+/** Which route option this is — coloured to match its trace on the map. */
+export function OptionChip({ kind, label, size = 'small' }: { kind: string; label: string; size?: ChipProps['size'] }) {
+  const color = OPTION_COLORS[kind] ?? '#6B7384';
   return (
     <Chip
       size={size}
-      label={APPROACH_LABEL[kind] ?? kind}
+      label={label}
       sx={{ color, bgcolor: alpha(color, 0.12), border: `1px solid ${alpha(color, 0.32)}`, fontWeight: 700 }}
     />
   );
 }
 
-export function ControllabilityChip({ value, size = 'small' }: { value: string; size?: ChipProps['size'] }) {
-  const direct = value.startsWith('Direct');
+/** The headline number on a decision: how much CO₂e it saves. */
+export function SavingChip({ tonnes, pct, size = 'small' }: { tonnes: number; pct?: number; size?: ChipProps['size'] }) {
   return (
     <Chip
       size={size}
-      variant="outlined"
-      color={direct ? 'primary' : 'default'}
-      label={value}
+      icon={<TrendingDownRoundedIcon sx={{ fontSize: 16, color: 'inherit !important' }} />}
+      label={`${formatTonnes(tonnes)} saved${pct !== undefined ? ` · ${Math.round(pct)}%` : ''}`}
+      sx={{
+        color: 'success.dark',
+        bgcolor: (t) => alpha(t.palette.success.main, 0.14),
+        border: (t) => `1px solid ${alpha(t.palette.success.main, 0.35)}`,
+        fontWeight: 800,
+      }}
+    />
+  );
+}
+
+/** Shipped vs still to be planned — the only status the workbook can support. */
+export function StatusChip({ status, size = 'small' }: { status: string; size?: ChipProps['size'] }) {
+  const open = status === 'Planned';
+  return (
+    <Chip
+      size={size}
+      variant={open ? 'filled' : 'outlined'}
+      label={STATUS_LABEL[status] ?? status}
+      sx={
+        open
+          ? {
+              fontWeight: 700,
+              color: 'primary.dark',
+              bgcolor: (t) => alpha(t.palette.primary.main, 0.14),
+              border: (t) => `1px solid ${alpha(t.palette.primary.main, 0.32)}`,
+            }
+          : { color: 'text.secondary' }
+      }
     />
   );
 }
@@ -72,5 +102,30 @@ export function ModeLegend() {
         </Stack>
       ))}
     </Stack>
+  );
+}
+
+/**
+ * A workbook cell reference, e.g. "2022-2024!AM12:AX12". Shown wherever a number
+ * needs to be checkable at source — the whole point of the app is that it can be.
+ */
+export function SourceRef({ refs, label = 'Workbook' }: { refs: string[]; label?: string }) {
+  const shown = refs.filter(Boolean).slice(0, 3);
+  if (!shown.length) return null;
+  return (
+    <Typography
+      variant="caption"
+      sx={{
+        display: 'block',
+        color: 'text.disabled',
+        fontFamily: 'monospace',
+        fontSize: 10.5,
+        mt: 0.5,
+        wordBreak: 'break-all',
+      }}
+    >
+      {label}: {shown.join(' · ')}
+      {refs.length > shown.length ? ` +${refs.length - shown.length} more` : ''}
+    </Typography>
   );
 }

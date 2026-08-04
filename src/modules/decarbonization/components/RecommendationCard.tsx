@@ -1,34 +1,18 @@
 import { useState } from 'react';
-import {
-  Box,
-  Button,
-  Card,
-  CardContent,
-  Chip,
-  Collapse,
-  Stack,
-  Tooltip,
-  Typography,
-} from '@mui/material';
+import { Box, Button, Card, CardContent, Chip, Collapse, Stack, Tooltip, Typography } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import OpenInNewRoundedIcon from '@mui/icons-material/OpenInNewRounded';
 import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded';
 import type { Recommendation } from '@/types';
-import { ApproachChip } from '@/components/shared/Chips';
-import { ConfidenceBar } from '@/components/shared/ConfidenceBar';
+import { SavingChip, SourceRef } from '@/components/shared/Chips';
 import { ModePathChange } from '@/components/shared/ModePath';
 import { TYPE_META } from '@/constants/actionTypes';
-import { formatCurrency, formatTonnes } from '@/utils/format';
+import { formatDate } from '@/utils/format';
 
-export function RecommendationCard({
-  rec,
-  onOpenLane,
-}: {
-  rec: Recommendation;
-  onOpenLane?: () => void;
-}) {
+/** A compact suggestion row — used wherever the full DecisionCard is too tall. */
+export function RecommendationCard({ rec, onOpenLane }: { rec: Recommendation; onOpenLane?: () => void }) {
   const [showEvidence, setShowEvidence] = useState(false);
-  const saving = rec.costImpactUsd <= 0;
+  const meta = TYPE_META[rec.type];
 
   return (
     <Card>
@@ -36,11 +20,11 @@ export function RecommendationCard({
         <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
           <Box sx={{ minWidth: 0 }}>
             <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
-              <Tooltip title={TYPE_META[rec.type]?.desc ?? ''} arrow>
+              <Tooltip title={meta?.desc ?? ''} arrow>
                 <Chip
                   size="small"
-                  icon={TYPE_META[rec.type]?.icon}
-                  label={TYPE_META[rec.type]?.label ?? rec.type}
+                  icon={meta?.icon}
+                  label={meta?.label ?? rec.type}
                   sx={{
                     fontWeight: 700,
                     bgcolor: (t) => alpha(t.palette.primary.main, 0.08),
@@ -49,51 +33,48 @@ export function RecommendationCard({
                   }}
                 />
               </Tooltip>
-              <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: 10 }}>
-                {rec.agent}
-              </Typography>
+              {rec.shipmentDate && (
+                <Typography variant="caption" color="text.secondary">
+                  ships {formatDate(rec.shipmentDate)}
+                </Typography>
+              )}
             </Stack>
             <Typography variant="subtitle1" sx={{ fontWeight: 700, lineHeight: 1.3 }}>
               {rec.title}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              {rec.laneLabel}
-            </Typography>
-            <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', fontStyle: 'italic', mt: 0.25 }}>
-              {TYPE_META[rec.type]?.desc}
+              {rec.laneLabel} · {rec.category}
             </Typography>
           </Box>
-          <Stack alignItems="flex-end" spacing={0.5}>
-            <ApproachChip kind={rec.approach} />
-          </Stack>
+          <SavingChip tonnes={rec.estCo2eSavingTonnes} pct={rec.estCo2eSavingPct} />
         </Stack>
 
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1, mb: 1.25 }}>
           {rec.rationale}
         </Typography>
 
-        {/* What actually changes — the transport modes, before and after */}
+        {/* What actually changes about the journey */}
         <ModePathChange from={rec.fromModePath} to={rec.toModePath} />
 
-        {/* The benefit, in plain words */}
         <Stack direction="row" flexWrap="wrap" useFlexGap gap={0.75} sx={{ mt: 1.25 }}>
-          <Chip size="small" color="success" variant="filled" sx={{ fontWeight: 700 }} label={`${formatTonnes(rec.estCo2eSavingTonnes)}/yr less CO₂e · ${rec.estCo2eSavingPct}% cleaner`} />
           <Chip
             size="small"
             variant="outlined"
-            color={saving ? 'success' : 'default'}
-            label={saving ? `Saves ${formatCurrency(Math.abs(rec.costImpactUsd))}/yr on freight` : `Costs ${formatCurrency(rec.costImpactUsd)}/yr more on freight`}
+            color={rec.transitImpactDays > 0 ? 'warning' : 'success'}
+            label={
+              rec.transitImpactDays === 0
+                ? 'Same transit time'
+                : `${rec.transitImpactDays > 0 ? '+' : '−'}${Math.abs(rec.transitImpactDays)} days (est.)`
+            }
           />
-          <Chip size="small" variant="outlined" label={`Delivery: ${rec.slaImpact}`} />
           <Chip size="small" variant="outlined" label={`${rec.complexity} effort`} />
         </Stack>
 
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }} sx={{ mt: 2 }}>
-          <ConfidenceBar value={rec.confidence} label="How confident" />
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }} sx={{ mt: 1.5 }}>
           <Box sx={{ flexGrow: 1 }} />
           {onOpenLane && (
             <Button size="small" variant="outlined" startIcon={<OpenInNewRoundedIcon />} onClick={onOpenLane}>
-              Lane 360
+              Open lane
             </Button>
           )}
         </Stack>
@@ -106,22 +87,28 @@ export function RecommendationCard({
           endIcon={<ExpandMoreRoundedIcon sx={{ transform: showEvidence ? 'rotate(180deg)' : 'none', transition: '.2s' }} />}
           sx={{ mt: 0.5, color: 'text.secondary' }}
         >
-          Evidence
+          Why this works
         </Button>
         <Collapse in={showEvidence}>
-          <Stack spacing={0.5} sx={{ mt: 0.5, pl: 1 }}>
-            {rec.evidence.map((ev, i) => (
-              <Stack key={i} direction="row" justifyContent="space-between">
-                <Typography variant="caption" color="text.secondary">
-                  {ev.label}
-                </Typography>
-                <Typography variant="caption" sx={{ fontWeight: 600 }}>
-                  {ev.value}
-                  {ev.comparison ? ` · ${ev.comparison}` : ''}
-                </Typography>
-              </Stack>
-            ))}
-          </Stack>
+          <Box sx={{ mt: 0.5, pl: 1 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1, lineHeight: 1.55 }}>
+              {rec.proof}
+            </Typography>
+            <Stack spacing={0.5}>
+              {rec.evidence.map((ev, i) => (
+                <Stack key={i} direction="row" justifyContent="space-between" spacing={2}>
+                  <Typography variant="caption" color="text.secondary">
+                    {ev.label}
+                  </Typography>
+                  <Typography variant="caption" sx={{ fontWeight: 600, textAlign: 'right' }}>
+                    {ev.value}
+                    {ev.comparison ? ` · ${ev.comparison}` : ''}
+                  </Typography>
+                </Stack>
+              ))}
+            </Stack>
+            <SourceRef refs={rec.proofRefs} />
+          </Box>
         </Collapse>
       </CardContent>
     </Card>

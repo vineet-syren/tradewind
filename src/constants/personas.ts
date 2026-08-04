@@ -1,36 +1,29 @@
 /**
- * Persona registry — the "Viewing as" switcher. Terova's footprint is a single
- * company network, so every persona sees the whole footprint; the persona
- * changes the *lens* (landing cards, default emphasis, copilot tone), not the
- * row set. Row scoping is done via the filter panel.
+ * Persona registry — the "Viewing as" switcher. Both personas see the whole
+ * network; the persona changes the lens (landing KPIs, default page, copilot
+ * tone), not the row set.
+ *
+ * There is no procurement persona because the workbook names no vendor,
+ * processor or carrier — there would be nothing for that role to act on.
  */
 import type { PersonaDef, PersonaId } from '@/types';
 
 export const PERSONAS: PersonaDef[] = [
   {
-    id: 'cso',
-    name: 'Chief Sustainability Officer',
-    role: 'Whole-network footprint, reduction ambition and ESG evidence.',
-    lens: 'Total CO₂e, progress to the 10–20% ambition, credible reporting.',
-    scope: { kind: 'all' },
-  },
-  {
     id: 'logistics',
     name: 'Logistics / Supply Chain Lead',
-    role: 'Route, mode and port decisions across outbound lanes.',
-    lens: 'Highest-impact lane actions, mode shift and air governance.',
-    scope: { kind: 'all' },
+    role: 'Chooses the gateway, mode and sailing for each shipment.',
+    lens: 'What to change on the freight that has not moved yet.',
   },
   {
-    id: 'procurement',
-    name: 'Procurement / Vendor Management',
-    role: 'Vendor, processor and LSP influence and governance.',
-    lens: 'Partner contribution and influenceable reduction.',
-    scope: { kind: 'all' },
+    id: 'cso',
+    name: 'Chief Sustainability Officer',
+    role: 'Owns the reported footprint and its evidence.',
+    lens: 'The reported total, its trend, and what it ties back to.',
   },
 ];
 
-export const DEFAULT_PERSONA: PersonaId = 'cso';
+export const DEFAULT_PERSONA: PersonaId = 'logistics';
 
 export function getPersona(id: PersonaId): PersonaDef {
   return PERSONAS.find((p) => p.id === id) ?? PERSONAS[0];

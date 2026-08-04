@@ -22,11 +22,8 @@ import type {
   Lane,
   LaneDetail,
   Paginated,
-  Partners,
   PersonaId,
-  PulseEvent,
   Recommendation,
-  ScheduleSummary,
   Shipment,
   ShipmentDetail,
   ShipmentFilters,
@@ -54,23 +51,22 @@ export interface CarbonDataSource {
   getShipment(id: string): Promise<ShipmentDetail | null>;
 
   // Lanes (decisioning corridors)
-  getLanes(params?: ScopeParams & { sortBy?: 'reduction' | 'co2e' }): Promise<Lane[]>;
+  getLanes(params?: ScopeParams & { sortBy?: 'avoidable' | 'co2e' }): Promise<Lane[]>;
   getLane(id: string): Promise<LaneDetail | null>;
 
   // Aggregates
   getFootprint(params?: ScopeParams): Promise<Footprint>;
   getHotspots(params?: ScopeParams): Promise<Hotspots>;
-  getPartners(params?: ScopeParams): Promise<Partners>;
   getEvidence(): Promise<EsgEvidence>;
-  getPulse(params?: ScopeParams): Promise<PulseEvent[]>;
   getExceptions(params?: ScopeParams): Promise<ExceptionItem[]>;
 
-  // Forward planning (scheduler) — future-dated shipments in the planning window
-  getSchedule(params?: ScopeParams): Promise<ScheduleSummary>;
-
-  // Recommendations & focus
+  /**
+   * The decision queue: shipments with a better workbook-evidenced option.
+   * `plannedOnly` narrows it to freight that has not shipped yet — the
+   * decisions a logistics lead can still act on.
+   */
   getRecommendations(
-    params?: ScopeParams & { laneId?: string; ownerPersona?: PersonaId },
+    params?: ScopeParams & { laneId?: string; plannedOnly?: boolean },
   ): Promise<Recommendation[]>;
   getFocusKpis(params: { persona?: PersonaId; filters?: ShipmentFilters }): Promise<KpiMetric[]>;
 

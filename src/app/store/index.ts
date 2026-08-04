@@ -14,7 +14,10 @@ const rootReducer = combineReducers({
  * via localStorage. A real backend replaces this seam later — the shape is
  * already serializable.
  */
-const STORAGE_KEY = 'tradewind-state-v1';
+// Bumped to v2 with the workbook rebuild: the filter dimensions changed, so a
+// v1 payload would restore keys that no longer exist and could scope the app to
+// nothing. A new key simply drops the stale state.
+const STORAGE_KEY = 'tradewind-state-v2';
 
 type PreloadedShape = Partial<ReturnType<typeof rootReducer>>;
 
@@ -30,7 +33,6 @@ function loadPersisted(): PreloadedShape | undefined {
         sidebarOpen: true,
         themeMode: saved.themeMode,
         selectedLaneId: null,
-        laneReadOnly: false,
         selectedShipmentId: null,
       };
     }

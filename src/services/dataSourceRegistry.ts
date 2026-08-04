@@ -11,7 +11,7 @@ export type DataSourceKey = 'mock' | 'api';
 
 const FACTORIES: Record<DataSourceKey, () => CarbonDataSource> = {
   mock: () => new MockDataSource(),
-  api: () => new ApiDataSource(),
+  api: () => new ApiDataSource(import.meta.env.VITE_API_BASE_URL ?? '/api'),
 };
 
 function resolveDataSource(): CarbonDataSource {

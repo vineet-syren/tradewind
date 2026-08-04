@@ -4,114 +4,122 @@
  * here, never in the components.
  */
 import type {
-  Assumptions,
   Footprint,
   Lane,
   ModeLabel,
   ModeSplitRow,
   NamedShare,
+  ReportingYearPoint,
   Shipment,
-  YearPoint,
 } from '@/types';
 
 const round = (n: number, dp = 1) => {
   const f = 10 ** dp;
   return Math.round(n * f) / f;
 };
+const total = (rows: Shipment[], f: (s: Shipment) => number) => rows.reduce((a, s) => a + f(s), 0);
 
 const MODES: ModeLabel[] = ['Ocean', 'Rail', 'Road', 'Air'];
 
-export function buildFootprint(
-  shipments: Shipment[],
-  lanes: Lane[],
-  assumptions: Assumptions,
-): Footprint {
-  const totalCo2eTonnes = shipments.reduce((s, x) => s + x.co2eTonnes, 0);
-  const totalWeightTonnes = shipments.reduce((s, x) => s + x.weightTonnes, 0);
-  // Tonne-kilometres (transport activity) — the denominator for true intensity.
-  const totalTonKm = shipments.reduce((s, x) => s + x.weightTonnes * x.totalDistanceKm, 0);
-  // g CO₂e per tonne-km = (tonnes × 1e6 g) / (tonne-km).
-  const gPerTonneKm = (co2eT: number, tonKm: number) => round((co2eT * 1e6) / Math.max(tonKm, 0.001), 1);
-  // Annualize by the actual month span (handles partial latest year correctly).
-  const months = new Set(shipments.map((s) => s.period));
-  const yearsCovered = Math.max(1, months.size / 12);
-  const annualCo2eTonnes = totalCo2eTonnes / yearsCovered;
+/** g CO₂e per tonne-km — the GLEC intensity unit. */
+const gPerTonneKm = (co2eT: number, tonneKm: number) => round((co2eT * 1e6) / Math.max(tonneKm, 0.001), 1);
 
-  // Mode split by the shipment's primary mode (Ocean-led vs Air exception).
+function shares(rows: Shipment[], key: (s: Shipment) => string, grand: number): NamedShare[] {
+  const agg = new Map<string, number>();
+  for (const s of rows) agg.set(key(s), (agg.get(key(s)) ?? 0) + s.co2eTonnes);
+  return [...agg.entries()]
+    .map(([label, co2e]) => ({
+      label,
+      co2eTonnes: round(co2e, 2),
+      pct: round((co2e / Math.max(grand, 0.001)) * 100, 1),
+    }))
+    .sort((a, b) => b.co2eTonnes - a.co2eTonnes);
+}
+
+export function buildFootprint(shipments: Shipment[], lanes: Lane[]): Footprint {
+  const totalCo2eTonnes = total(shipments, (s) => s.co2eTonnes);
+  const totalWeightTonnes = total(shipments, (s) => s.weightTonnes);
+  const totalTonneKm = total(shipments, (s) => s.weightTonnes * s.totalDistanceKm);
+
+  // Mode split by the leg mode that dominates each shipment's CO₂e.
   const modeAgg = new Map<ModeLabel, { co2e: number; ships: number }>();
   for (const s of shipments) {
-    const k = s.primaryMode;
-    const g = modeAgg.get(k) ?? { co2e: 0, ships: 0 };
+    const g = modeAgg.get(s.primaryMode) ?? { co2e: 0, ships: 0 };
     g.co2e += s.co2eTonnes;
     g.ships += 1;
-    modeAgg.set(k, g);
+    modeAgg.set(s.primaryMode, g);
   }
   const modeSplit: ModeSplitRow[] = MODES.filter((m) => modeAgg.has(m)).map((m) => {
     const g = modeAgg.get(m)!;
-    return { mode: m, co2eTonnes: round(g.co2e, 2), pct: round((g.co2e / Math.max(totalCo2eTonnes, 0.001)) * 100, 1), shipments: g.ships };
+    return {
+      mode: m,
+      co2eTonnes: round(g.co2e, 2),
+      pct: round((g.co2e / Math.max(totalCo2eTonnes, 0.001)) * 100, 1),
+      shipments: g.ships,
+    };
   });
 
-  // Year-over-year (CO₂e + intensity per calendar year).
-  const yearAgg = new Map<number, { co2e: number; weight: number; tonKm: number }>();
+  // By reporting year — the workbook's own Jul→Jun windows, in workbook order.
+  const yearAgg = new Map<string, { co2e: number; weight: number; tonneKm: number; n: number }>();
   for (const s of shipments) {
-    const g = yearAgg.get(s.year) ?? { co2e: 0, weight: 0, tonKm: 0 };
+    const g = yearAgg.get(s.reportingYear) ?? { co2e: 0, weight: 0, tonneKm: 0, n: 0 };
     g.co2e += s.co2eTonnes;
     g.weight += s.weightTonnes;
-    g.tonKm += s.weightTonnes * s.totalDistanceKm;
-    yearAgg.set(s.year, g);
+    g.tonneKm += s.weightTonnes * s.totalDistanceKm;
+    g.n += 1;
+    yearAgg.set(s.reportingYear, g);
   }
-  const byYear: YearPoint[] = [...yearAgg.entries()]
-    .map(([year, g]) => ({ year, co2eTonnes: round(g.co2e, 1), weightTonnes: round(g.weight, 1), intensity: gPerTonneKm(g.co2e, g.tonKm) }))
-    .sort((a, b) => a.year - b.year);
+  const byReportingYear: ReportingYearPoint[] = [...yearAgg.entries()]
+    .map(([reportingYear, g]) => ({
+      reportingYear,
+      co2eTonnes: round(g.co2e, 2),
+      weightTonnes: round(g.weight, 1),
+      intensity: gPerTonneKm(g.co2e, g.tonneKm),
+      shipments: g.n,
+    }))
+    .sort((a, b) => a.reportingYear.localeCompare(b.reportingYear));
 
-  // By destination region.
-  const regionAgg = new Map<string, number>();
-  for (const s of shipments) regionAgg.set(s.region, (regionAgg.get(s.region) ?? 0) + s.co2eTonnes);
-  const byRegion: NamedShare[] = [...regionAgg.entries()]
-    .map(([label, co2e]) => ({ label, co2eTonnes: round(co2e, 2), pct: round((co2e / Math.max(totalCo2eTonnes, 0.001)) * 100, 1) }))
-    .sort((a, b) => b.co2eTonnes - a.co2eTonnes);
+  // "Latest year" means the last complete reporting year in scope, so the
+  // headline number is comparable rather than a part-year sum.
+  const complete = byReportingYear.filter((y) => !y.reportingYear.includes('planned'));
+  const latest = complete.at(-1);
+  const previous = complete.at(-2);
 
-  // Customer concentration (top 5 share).
-  const custAgg = new Map<string, number>();
-  for (const s of shipments) custAgg.set(s.customer, (custAgg.get(s.customer) ?? 0) + s.co2eTonnes);
-  const top5 = [...custAgg.values()].sort((a, b) => b - a).slice(0, 5).reduce((a, b) => a + b, 0);
-  const top5CustomerSharePct = round((top5 / Math.max(totalCo2eTonnes, 0.001)) * 100, 0);
+  const byDest = shares(shipments, (s) => s.destPort, totalCo2eTonnes);
+  const top3DestSharePct = round(byDest.slice(0, 3).reduce((a, d) => a + d.pct, 0), 0);
 
-  // Realized reduction (weighted): reconstruct gross from net + realized %.
-  let gross = 0;
-  for (const s of shipments) gross += s.co2eTonnes / (1 - s.realizedReductionPct / 100);
-  const avoided = gross - totalCo2eTonnes;
-  const realizedReductionPct = round((avoided / Math.max(gross, 0.001)) * 100, 1);
-
-  // Reduction opportunity — scope lanes to those touched by the shipment set.
   const laneIds = new Set(shipments.map((s) => s.laneId));
   const scopedLanes = lanes.filter((l) => laneIds.has(l.laneId));
-  const reductionOpportunityTonnes = round(scopedLanes.reduce((s, l) => s + l.realizableReductionTonnes, 0), 1);
-  const theoreticalReductionTonnes = round(scopedLanes.reduce((s, l) => s + l.reductionPotentialTonnes, 0), 1);
-  const reductionOpportunityPct = round((reductionOpportunityTonnes / Math.max(annualCo2eTonnes, 0.001)) * 100, 1);
 
-  const airShipments = shipments.filter((s) => s.airException);
+  const planned = shipments.filter((s) => s.status === 'Planned');
+  const avoidableTonnes = total(shipments, (s) => s.avoidableTonnes);
+  const airRows = shipments.filter((s) => s.isAirFreight);
 
   return {
-    totalCo2eTonnes: round(totalCo2eTonnes, 1),
-    annualCo2eTonnes: round(annualCo2eTonnes, 1),
+    totalCo2eTonnes: round(totalCo2eTonnes, 2),
+    latestYearCo2eTonnes: latest?.co2eTonnes ?? round(totalCo2eTonnes, 2),
+    latestReportingYear: latest?.reportingYear ?? '—',
     totalWeightTonnes: round(totalWeightTonnes, 1),
-    avgIntensity: gPerTonneKm(totalCo2eTonnes, totalTonKm),
+    avgIntensity: gPerTonneKm(totalCo2eTonnes, totalTonneKm),
     shipmentCount: shipments.length,
     laneCount: scopedLanes.length,
     modeSplit,
-    byRegion,
-    byYear,
-    reductionOpportunityTonnes,
-    reductionOpportunityPct,
-    theoreticalReductionTonnes,
-    realizedReductionPct,
-    ambitionPct: assumptions.ambitionPct,
-    airExceptionCount: airShipments.length,
-    airAvoidableCount: airShipments.filter((s) => s.airAvoidable === true).length,
-    airCo2eTonnes: round(airShipments.reduce((s, x) => s + x.co2eTonnes, 0), 2),
-    liveShipmentCount: shipments.filter((s) => s.status === 'In transit' || s.status === 'Planned').length,
-    topLanes: [...scopedLanes].sort((a, b) => b.realizableReductionTonnes - a.realizableReductionTonnes).slice(0, 6),
-    top5CustomerSharePct,
+    byRegion: shares(shipments, (s) => s.region, totalCo2eTonnes),
+    byCategory: shares(shipments, (s) => s.category, totalCo2eTonnes),
+    byGateway: shares(shipments, (s) => s.gateway ?? 'No gateway (air / collection)', totalCo2eTonnes),
+    byReportingYear,
+    avoidableTonnes: round(avoidableTonnes, 2),
+    avoidablePct: round((avoidableTonnes / Math.max(totalCo2eTonnes, 0.001)) * 100, 1),
+    plannedAvoidableTonnes: round(total(planned, (s) => s.avoidableTonnes), 2),
+    plannedShipmentCount: planned.length,
+    yoyChangePct:
+      latest && previous && previous.co2eTonnes > 0
+        ? round(((latest.co2eTonnes - previous.co2eTonnes) / previous.co2eTonnes) * 100, 1)
+        : null,
+    airShipmentCount: airRows.length,
+    airCo2eTonnes: round(total(airRows, (s) => s.co2eTonnes), 2),
+    roadCo2eTonnes: round(total(shipments, (s) => s.roadCo2eTonnes), 2),
+    topLanes: [...scopedLanes].sort((a, b) => b.avoidableTonnes - a.avoidableTonnes).slice(0, 6),
+    top3DestSharePct,
   };
 }
