@@ -6,7 +6,7 @@ import { useDataSource } from '@/hooks/useDataSource';
 import { useAsync } from '@/hooks/useAsync';
 import { TableSkeleton } from '@/components/loaders/Skeletons';
 import { WorldMap } from '@/components/map/WorldMap';
-import { RouteOptionCard } from './RouteOptionCard';
+import { ScenarioCard } from './ScenarioCard';
 import { RecommendationCard } from './RecommendationCard';
 import { formatTonnes, formatIntensity, formatWeightTonnes } from '@/utils/format';
 
@@ -123,7 +123,7 @@ export function LaneDetailContent({ laneId }: { laneId: string }) {
           </Typography>
           <Stack spacing={1.5}>
             {lane.options.map((o) => (
-              <RouteOptionCard key={o.id} option={o} recommended={!o.isCurrent && o.id === best?.id} />
+              <ScenarioCard key={o.id} option={o} recommended={!o.isCurrent && o.id === best?.id} />
             ))}
           </Stack>
         </Box>

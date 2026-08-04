@@ -41,6 +41,12 @@ const PROMPTS_BY_PERSONA: Record<PersonaId, string[]> = {
     'What did air freight cost us in CO₂e?',
     'Show me the mode split',
   ],
+  analyst: [
+    'Where is our transport CO₂e concentrated?',
+    'Show me the mode split',
+    'How does the latest year compare with the baseline?',
+    'Why is the Chennai gateway heavier than Nhava Sheva?',
+  ],
 };
 
 let seq = 0;

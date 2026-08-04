@@ -6,7 +6,7 @@ import { useAsync } from '@/hooks/useAsync';
 import { TableSkeleton } from '@/components/loaders/Skeletons';
 import { ModeChip, SourceRef, StatusChip } from '@/components/shared/Chips';
 import { LegTimeline } from '@/modules/decarbonization/components/LegTimeline';
-import { RouteOptionCard } from '@/modules/decarbonization/components/RouteOptionCard';
+import { ScenarioCard } from '@/modules/decarbonization/components/ScenarioCard';
 import { formatTonnes, formatDistance, formatWeightTonnes, formatIntensity, formatDate, formatLitres } from '@/utils/format';
 
 function Fact({ label, value }: { label: string; value: ReactNode }) {
@@ -99,7 +99,7 @@ export function ShipmentDetailDialog({ shipmentId, onClose }: { shipmentId: stri
             </Typography>
             <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr', sm: 'repeat(2,1fr)' } }}>
               {s.options.map((o) => (
-                <RouteOptionCard key={o.id} option={o} recommended={!o.isCurrent && o.id === best?.id} compact />
+                <ScenarioCard key={o.id} option={o} recommended={!o.isCurrent && o.id === best?.id} compact />
               ))}
             </Box>
             {s.options.length === 1 && (

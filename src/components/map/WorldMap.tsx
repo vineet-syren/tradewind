@@ -44,8 +44,18 @@ function FitBounds({ points }: { points: LatLng[] }) {
   const key = points.map((p) => p.join(',')).join('|');
   useEffect(() => {
     if (!points.length) return;
-    map.fitBounds(L.latLngBounds(points.map((p) => L.latLng(p[0], p[1]))), { padding: [42, 42], maxZoom: 6, animate: true });
-    setTimeout(() => map.invalidateSize(), 220);
+    const bounds = L.latLngBounds(points.map((p) => L.latLng(p[0], p[1])));
+    // Size first, then fit. Fitting against a container that has not been laid
+    // out yet computes the zoom for a near-zero viewport, which lands the map
+    // deep inside the bounds instead of around them.
+    const fit = () => {
+      map.invalidateSize();
+      map.fitBounds(bounds, { padding: [42, 42], maxZoom: 6, animate: false });
+    };
+    fit();
+    // Re-fit once the pane has settled (fonts, sticky columns, split-pane drag).
+    const t = setTimeout(fit, 240);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, key]);
   return null;

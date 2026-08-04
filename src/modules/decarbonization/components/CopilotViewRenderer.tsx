@@ -6,7 +6,7 @@ import OpenInNewRoundedIcon from '@mui/icons-material/OpenInNewRounded';
 import type { CopilotView, Lane, Recommendation } from '@/types';
 import { KpiCard } from '@/components/cards/KpiCard';
 import { ModeSplitDonut } from '@/components/charts/ModeSplitDonut';
-import { RouteOptionCard } from '@/modules/decarbonization/components/RouteOptionCard';
+import { ScenarioCard } from '@/modules/decarbonization/components/ScenarioCard';
 import { TYPE_META } from '@/constants/actionTypes';
 import { formatTonnes, formatIntensity } from '@/utils/format';
 
@@ -36,7 +36,7 @@ export function CopilotViewRenderer({ view, onOpenLane }: { view: CopilotView; o
     return (
       <Stack spacing={1}>
         {view.options.map((o) => (
-          <RouteOptionCard key={o.id} option={o} compact />
+          <ScenarioCard key={o.id} option={o} compact />
         ))}
       </Stack>
     );

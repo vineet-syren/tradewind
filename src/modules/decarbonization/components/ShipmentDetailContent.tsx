@@ -7,7 +7,7 @@ import { setSelectedLane } from '@/app/store/uiSlice';
 import { TableSkeleton } from '@/components/loaders/Skeletons';
 import { ModeChip, SourceRef, StatusChip } from '@/components/shared/Chips';
 import { LegTimeline } from './LegTimeline';
-import { RouteOptionCard } from './RouteOptionCard';
+import { ScenarioCard } from './ScenarioCard';
 import { RecommendationCard } from './RecommendationCard';
 import { formatTonnes, formatIntensity, formatDate, formatWeightTonnes, formatDistance } from '@/utils/format';
 
@@ -90,7 +90,7 @@ export function ShipmentDetailContent({ shipmentId }: { shipmentId: string }) {
           </Typography>
           <Stack spacing={1.5}>
             {s.options.map((o) => (
-              <RouteOptionCard key={o.id} option={o} recommended={!o.isCurrent && o.id === best?.id} compact />
+              <ScenarioCard key={o.id} option={o} recommended={!o.isCurrent && o.id === best?.id} compact />
             ))}
           </Stack>
         </Box>

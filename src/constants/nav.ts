@@ -15,22 +15,28 @@ export interface NavGroupDef {
 }
 
 /**
- * Four pages, deliberately. The logistics lead lands on the decision queue; the
- * CSO lands on the report. Hotspots and Lanes are the two "where is it" views
- * both roles share.
+ * Role-based visibility — each persona sees only the pages their job needs:
+ * - CSO: whole-network visibility + reporting (no day-to-day ops tower).
+ * - Logistics lead: the operational tower + route/hotspot visibility.
+ * - Analyst: the analytical slices and the report.
+ *
+ * "Carrier & Vendor Performance" is deliberately absent: the source workbook
+ * names no vendor, processor or carrier, so there is nothing real to rank.
  */
+// "Ask Tradewind" is not a page — it lives as a right-docked chat widget
+// (CopilotDock) available everywhere, so it is intentionally absent here.
 export const NAV_GROUPS: NavGroupDef[] = [
   {
     heading: '',
     items: [
-      { label: 'Decisions', to: '/decisions', iconKey: 'decisioning', personas: ['logistics'] },
+      { label: 'Control Tower', to: '/control-tower', iconKey: 'atlas', personas: ['logistics'] },
       { label: 'Emission Hotspots', to: '/hotspots', iconKey: 'hotspots' },
-      { label: 'Lanes', to: '/lanes', iconKey: 'lanes' },
+      { label: 'Product & Destination Lanes', to: '/lanes', iconKey: 'lanes' },
     ],
   },
   {
     heading: 'REPORT',
-    items: [{ label: 'Footprint & Evidence', to: '/evidence', iconKey: 'evidence' }],
+    items: [{ label: 'ESG Reporting', to: '/evidence', iconKey: 'evidence', personas: ['cso', 'analyst'] }],
   },
 ];
 
@@ -42,10 +48,11 @@ export function navGroupsForPersona(persona: PersonaId): NavGroupDef[] {
   })).filter((g) => g.items.length > 0);
 }
 
-/** Where each role should land: the lead on decisions, the CSO on the report. */
+/** Where each role lands: the lead on the tower, the CSO on the report. */
 const PERSONA_HOME: Record<PersonaId, string> = {
-  logistics: '/decisions',
+  logistics: '/control-tower',
   cso: '/evidence',
+  analyst: '/hotspots',
 };
 
 export function personaHomePath(persona: PersonaId): string {

@@ -1,40 +1,37 @@
 import type { ReactNode } from 'react';
-import { Box, Card, CardContent, Stack, Typography } from '@mui/material';
+import { Box, Card, CardContent, Typography } from '@mui/material';
 import { formatTonnes } from '@/utils/format';
 
 export interface HeroPart {
   label: string;
   tonnes: number;
-  count: number;
 }
 
 /**
- * The one sentence a logistics lead should read first: how much CO₂e is sitting
- * in freight they have not booked yet, and what kind of change would release it.
+ * The dark "value on the table" banner — the CO₂e avoidable across the scoped
+ * network, broken down by the kind of change that would release it.
  *
- * Deliberately states only what the workbook supports — these are re-costings of
- * routes the sheet already records, not projections.
+ * Every figure is a re-costing of a route the workbook itself records, so the
+ * copy says "proven", not "modelled".
  */
 export function ValueHero({
   totalTonnes,
-  decisionCount,
   parts,
-  asOf,
-  emptyMessage,
+  recCount,
+  shipmentCount,
 }: {
   totalTonnes: number;
-  decisionCount: number;
   parts: HeroPart[];
-  /** The date the app treats as today — the day after the workbook closes. */
-  asOf?: string;
-  emptyMessage?: string;
+  recCount: number;
+  /** Shipments the total is spread across, when known. */
+  shipmentCount?: number;
 }) {
+  if (totalTonnes <= 0) return null;
   const A = ({ children }: { children: ReactNode }) => (
     <Box component="span" sx={{ color: '#E7A93B', fontWeight: 800, whiteSpace: 'nowrap' }}>
       {children}
     </Box>
   );
-
   return (
     <Card
       sx={{
@@ -54,51 +51,31 @@ export function ValueHero({
             textTransform: 'uppercase',
           }}
         >
-          Still to be planned{asOf ? ` · as of ${asOf}` : ''}
+          Avoidable across the network
         </Typography>
-
-        {decisionCount === 0 ? (
-          <Typography sx={{ mt: 1.25, fontWeight: 800, lineHeight: 1.3, fontSize: { xs: '1.4rem', md: '1.8rem' } }}>
-            {emptyMessage ?? 'Every shipment ahead is already on the lowest-carbon route your records can prove.'}
-          </Typography>
-        ) : (
-          <>
-            <Typography
-              sx={{
-                mt: 1.25,
-                fontWeight: 800,
-                lineHeight: 1.25,
-                fontSize: { xs: '1.5rem', md: '2rem' },
-                textWrap: 'balance',
-              }}
-            >
-              <A>{formatTonnes(totalTonnes)} CO₂e</A> is sitting in{' '}
-              <A>
-                {decisionCount} shipment{decisionCount === 1 ? '' : 's'}
-              </A>{' '}
-              you have not booked yet — every alternative below is a route your own workbook has already run.
-            </Typography>
-
-            {parts.length > 0 && (
-              <Stack direction="row" spacing={3} sx={{ mt: 2.5, flexWrap: 'wrap' }} useFlexGap>
-                {parts.map((p) => (
-                  <Box key={p.label}>
-                    <Typography sx={{ fontSize: '1.35rem', fontWeight: 800, lineHeight: 1.1, color: '#E7A93B' }}>
-                      {formatTonnes(p.tonnes)}
-                    </Typography>
-                    <Typography sx={{ fontSize: 12.5, color: 'rgba(255,255,255,0.72)' }}>
-                      {p.label} · {p.count} shipment{p.count === 1 ? '' : 's'}
-                    </Typography>
-                  </Box>
-                ))}
-              </Stack>
-            )}
-          </>
-        )}
-
-        <Typography sx={{ mt: 2, color: 'rgba(255,255,255,0.6)', fontSize: '.85rem' }}>
-          Bookings stay in your own systems. Tradewind only prices the options — using the distances and emission factors
-          from your transport workbook, with the source cell shown against every figure.
+        <Typography
+          sx={{ mt: 1.25, fontWeight: 800, lineHeight: 1.25, fontSize: { xs: '1.5rem', md: '2rem' }, textWrap: 'balance' }}
+        >
+          You&rsquo;re leaving <A>{formatTonnes(totalTonnes)} CO₂e</A> on the table
+          {parts.length > 0 && <> — </>}
+          {parts.map((p, i) => (
+            <Box component="span" key={p.label}>
+              <A>{formatTonnes(p.tonnes)}</A> from {p.label}
+              {i < parts.length - 2 ? ', ' : i === parts.length - 2 ? ', and ' : ''}
+            </Box>
+          ))}
+          .
+        </Typography>
+        <Typography sx={{ mt: 1.5, color: 'rgba(255,255,255,0.72)', fontSize: '.95rem' }}>
+          Not a model — every alternative is a route your own transport workbook has already run, re-costed with its
+          distances and emission factors. <b style={{ color: '#fff' }}>{recCount}</b> ranked suggestion
+          {recCount === 1 ? '' : 's'} explain how
+          {shipmentCount ? (
+            <>
+              , across <b style={{ color: '#fff' }}>{shipmentCount}</b> shipment{shipmentCount === 1 ? '' : 's'}
+            </>
+          ) : null}
+          . Booking stays in your own systems.
         </Typography>
       </CardContent>
     </Card>

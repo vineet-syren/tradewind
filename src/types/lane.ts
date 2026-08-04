@@ -61,7 +61,11 @@ export interface Lane {
   modePath: ModeLabel[];
   hasAirFreight: boolean;
   airShipmentCount: number;
+  /** Share of this lane's CO₂e that came from shipments that flew (%). */
+  airSharePct: number;
   shipmentCount: number;
+  /** Shipments per reporting year the lane was active — the annualisation basis. */
+  annualFrequency: number;
   plannedShipmentCount: number;
   totalWeightTonnes: number;
   totalCo2eTonnes: number;
@@ -78,6 +82,10 @@ export interface Lane {
   plannedAvoidableTonnes: number;
   bestOptionKind: string | null;
   bestOptionLabel: string | null;
+  /** CO₂e for a representative shipment on the route as booked today. */
+  currentPerShipmentTonnes: number;
+  /** Same shipment on the best workbook-evidenced option. */
+  bestPerShipmentTonnes: number;
   coords: LaneCoords;
 }
 

@@ -3,7 +3,6 @@ import { Box, Card, CardContent, Chip, MenuItem, Stack, TextField, Typography } 
 import ReceiptLongRounded from '@mui/icons-material/ReceiptLongRounded';
 import { ChartContainer } from '@/components/charts/ChartContainer';
 import { DataTable, type Column } from '@/components/tables/DataTable';
-import { FilterPanel } from '@/components/filters/FilterPanel';
 import { ModeIcon } from '@/components/layout/iconRegistry';
 import { ShipmentDetailDialog } from '@/components/shipments/ShipmentDetailDialog';
 import { StatusChip } from '@/components/shared/Chips';
@@ -12,9 +11,10 @@ import { useDataSource } from '@/hooks/useDataSource';
 import { useAsync } from '@/hooks/useAsync';
 import { useAppSelector } from '@/app/store/hooks';
 import type { Shipment } from '@/types';
-import { APP_TODAY, addDaysISO } from '@/constants/app';
+import { APP_TODAY, STATUS_LABEL, addDaysISO } from '@/constants/app';
 import { formatTonnes, formatDistance, formatNumber, formatWeightTonnes, formatIntensity, formatDate } from '@/utils/format';
 
+const STATUSES = ['All', 'Delivered', 'Planned'] as const;
 const STREAMS = [
   { value: 'export', label: 'Export shipments' },
   { value: 'collection', label: 'First-mile collection' },
@@ -25,7 +25,10 @@ type Stream = (typeof STREAMS)[number]['value'];
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <Box>
-      <Typography variant="caption" sx={{ color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.07em', fontSize: 11, display: 'block' }}>
+      <Typography
+        variant="caption"
+        sx={{ color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.07em', fontSize: 11, display: 'block' }}
+      >
         {label}
       </Typography>
       <Typography variant="subtitle1" sx={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
@@ -36,19 +39,27 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 /**
- * Every movement in the workbook, newest first. A row click opens the full leg
- * breakdown with each figure's source cell.
+ * The shipment register — statement-style, newest first, scoped by the global
+ * filters plus a local status and stream. A row click either tells the parent to
+ * isolate that route on the map, or opens the full breakdown dialog.
  *
- * Export and collection are separated by default because they answer different
- * questions — the export chain is what a route decision can change; collection
- * is inbound raw material and belongs in the total but not in the queue.
+ * Export and collection are separated by default: the export chain is what a
+ * route decision can change, collection is inbound raw material.
  */
-export function ShipmentRegister({ onRowSelect, selectedId }: { onRowSelect?: (s: Shipment) => void; selectedId?: string | null }) {
+export function ShipmentLedgerSection({
+  onRowSelect,
+  selectedId,
+  compact = false,
+}: {
+  onRowSelect?: (s: Shipment) => void;
+  selectedId?: string | null;
+  compact?: boolean;
+}) {
   const ds = useDataSource();
   const persona = useAppSelector((s) => s.persona.current);
   const filters = useAppSelector((s) => s.filters.value);
   // With no explicit range the register shows history *and* the forward book, so
-  // an unbooked shipment can be found here too. A user-set range still wins.
+  // an unbooked shipment can be selected and re-routed. A user range still wins.
   const wideRange = !filters.dateFrom && !filters.dateTo;
   const { data: result, status } = useAsync(
     () =>
@@ -62,21 +73,24 @@ export function ShipmentRegister({ onRowSelect, selectedId }: { onRowSelect?: (s
       }),
     [persona, filters],
   );
+  const [statusFilter, setStatusFilter] = useState<(typeof STATUSES)[number]>('All');
   const [stream, setStream] = useState<Stream>('export');
   const [selected, setSelected] = useState<string | null>(null);
 
   const rows = useMemo(() => {
-    const items = result?.items ?? [];
-    return stream === 'all' ? items : items.filter((s) => s.stream === stream);
-  }, [result, stream]);
+    let items = result?.items ?? [];
+    if (stream !== 'all') items = items.filter((s) => s.stream === stream);
+    if (statusFilter !== 'All') items = items.filter((s) => s.status === statusFilter);
+    return items;
+  }, [result, stream, statusFilter]);
 
   const totals = useMemo(() => {
     const co2e = rows.reduce((a, s) => a + s.co2eTonnes, 0);
     const weight = rows.reduce((a, s) => a + s.weightTonnes, 0);
     const tonneKm = rows.reduce((a, s) => a + s.weightTonnes * s.totalDistanceKm, 0);
     const avoidable = rows.reduce((a, s) => a + s.avoidableTonnes, 0);
-    const open = rows.filter((s) => s.status === 'Planned').length;
-    return { co2e, weight, avoidable, open, intensity: tonneKm ? (co2e * 1e6) / tonneKm : 0 };
+    const byStatus = rows.reduce<Record<string, number>>((acc, s) => ((acc[s.status] = (acc[s.status] ?? 0) + 1), acc), {});
+    return { co2e, weight, avoidable, intensity: tonneKm ? (co2e * 1e6) / tonneKm : 0, byStatus };
   }, [rows]);
 
   const period =
@@ -87,11 +101,17 @@ export function ShipmentRegister({ onRowSelect, selectedId }: { onRowSelect?: (s
   const allColumns: Column<Shipment>[] = [
     {
       key: 'id',
-      header: 'Shipment',
+      header: 'Shipment ID',
       render: (s) => (
         <Typography
           variant="body2"
-          sx={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12, fontWeight: 600, color: 'text.secondary', whiteSpace: 'nowrap' }}
+          sx={{
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+            fontSize: 12,
+            fontWeight: 600,
+            color: 'text.secondary',
+            whiteSpace: 'nowrap',
+          }}
         >
           {s.shipmentId}
         </Typography>
@@ -100,7 +120,7 @@ export function ShipmentRegister({ onRowSelect, selectedId }: { onRowSelect?: (s
     },
     {
       key: 'date',
-      header: 'Dispatch',
+      header: 'Ship date',
       render: (s) => (
         <Typography variant="body2" sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
           {formatDate(s.date)}
@@ -108,11 +128,17 @@ export function ShipmentRegister({ onRowSelect, selectedId }: { onRowSelect?: (s
       ),
       sortValue: (s) => s.date,
     },
+    {
+      key: 'eta',
+      header: 'ETA (est.)',
+      render: (s) => <span style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{formatDate(s.eta)}</span>,
+      sortValue: (s) => s.eta,
+    },
     { key: 'status', header: 'Status', render: (s) => <StatusChip status={s.status} />, sortValue: (s) => s.status },
     { key: 'year', header: 'Reporting year', render: (s) => s.reportingYear, sortValue: (s) => s.reportingYear },
     {
       key: 'lane',
-      header: 'Route',
+      header: 'Lane',
       render: (s) => (
         <Typography variant="body2" sx={{ fontWeight: 600 }}>
           {s.origin} → {s.destPort}
@@ -180,55 +206,89 @@ export function ShipmentRegister({ onRowSelect, selectedId }: { onRowSelect?: (s
     },
   ];
 
-  const columns = stream === 'collection' ? allColumns.filter((c) => !['gateway', 'avoidable'].includes(c.key)) : allColumns;
+  // Compact view (for the split layout) keeps only the essentials — the full
+  // detail opens in the panel alongside.
+  const compactKeys = ['id', 'date', 'status', 'lane', 'product', 'co2e', 'avoidable'];
+  let columns = compact ? allColumns.filter((c) => compactKeys.includes(c.key)) : allColumns;
+  if (stream === 'collection') columns = columns.filter((c) => !['gateway', 'avoidable', 'eta'].includes(c.key));
+
   const handleRow = (s: Shipment) => (onRowSelect ? onRowSelect(s) : setSelected(s.shipmentId));
 
   return (
     <Box>
-      <FilterPanel />
-
       <Card sx={{ mb: 2.5 }}>
         <CardContent sx={{ py: 2 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap gap={2}>
             <Box>
-              <Typography variant="caption" sx={{ color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: 11 }}>
-                In view
+              <Typography
+                variant="caption"
+                sx={{ color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: 11 }}
+              >
+                Statement period
               </Typography>
               <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
                 {period}
               </Typography>
             </Box>
             <Stack direction="row" spacing={4} useFlexGap flexWrap="wrap">
-              <Stat label="Movements" value={formatNumber(rows.length)} />
-              <Stat label="CO₂e" value={formatTonnes(totals.co2e)} />
-              <Stat label="Weight" value={`${formatNumber(totals.weight)} t`} />
-              <Stat label="Intensity" value={formatIntensity(totals.intensity)} />
+              <Stat label="Shipments" value={formatNumber(rows.length)} />
+              <Stat label="Total CO₂e" value={formatTonnes(totals.co2e)} />
+              <Stat label="Total weight" value={`${formatNumber(totals.weight)} t`} />
+              <Stat label="Avg intensity" value={formatIntensity(totals.intensity)} />
               {totals.avoidable > 0.0005 && <Stat label="Avoidable" value={formatTonnes(totals.avoidable)} />}
             </Stack>
-            {totals.open > 0 && <Chip size="small" color="primary" variant="outlined" label={`${totals.open} still to be planned`} />}
+            <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
+              {(['Delivered', 'Planned'] as const).map((st) =>
+                totals.byStatus[st] ? (
+                  <Chip
+                    key={st}
+                    size="small"
+                    variant="outlined"
+                    color={st === 'Planned' ? 'primary' : 'success'}
+                    label={`${STATUS_LABEL[st] ?? st} ${totals.byStatus[st]}`}
+                  />
+                ) : null,
+              )}
+            </Stack>
           </Stack>
         </CardContent>
       </Card>
 
       <ChartContainer
         title="Shipment register"
-        subtitle="Every movement the workbook records · click a row for its legs, factors and source cells"
+        subtitle="Every movement the workbook records, newest first · click a row to trace its route and see the full breakdown"
         icon={<ReceiptLongRounded sx={{ fontSize: 18 }} />}
         action={
-          <TextField select size="small" label="Show" value={stream} onChange={(e) => setStream(e.target.value as Stream)} sx={{ width: 190 }}>
-            {STREAMS.map((s) => (
-              <MenuItem key={s.value} value={s.value}>
-                {s.label}
-              </MenuItem>
-            ))}
-          </TextField>
+          <Stack direction="row" spacing={1}>
+            <TextField select size="small" label="Show" value={stream} onChange={(e) => setStream(e.target.value as Stream)} sx={{ width: 168 }}>
+              {STREAMS.map((s) => (
+                <MenuItem key={s.value} value={s.value}>
+                  {s.label}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              select
+              size="small"
+              label="Status"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as (typeof STATUSES)[number])}
+              sx={{ width: 150 }}
+            >
+              {STATUSES.map((st) => (
+                <MenuItem key={st} value={st}>
+                  {st === 'All' ? 'All' : (STATUS_LABEL[st] ?? st)}
+                </MenuItem>
+              ))}
+            </TextField>
+          </Stack>
         }
       >
         {status === 'loading' || !result ? (
           <TableSkeleton rows={10} />
         ) : rows.length === 0 ? (
           <Typography variant="body2" color="text.secondary" sx={{ py: 6, textAlign: 'center' }}>
-            No movements match this period and filter set. Widen the date range or clear a filter.
+            No shipments match this period and filter set. Widen the date range or clear a filter.
           </Typography>
         ) : (
           <DataTable
@@ -238,7 +298,8 @@ export function ShipmentRegister({ onRowSelect, selectedId }: { onRowSelect?: (s
             onRowClick={handleRow}
             selectedRowKey={selectedId ?? selected}
             initialSortKey="date"
-            maxHeight={620}
+            maxHeightCss={compact ? 'calc(100vh - 210px)' : undefined}
+            maxHeight={compact ? undefined : 620}
           />
         )}
       </ChartContainer>

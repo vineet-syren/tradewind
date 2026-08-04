@@ -97,15 +97,20 @@ and each planned row carries a `derivedFromRef` pointing at the workbook cell it
 
 | Page | Who | What it does |
 |---|---|---|
-| **Decisions** | Logistics lead | The forward book, grouped by *change* rather than shipment and ranked by CO₂e saved. Each card carries the before/after, the transit cost, the affected shipments and the workbook evidence — no click needed to judge it. Selecting a shipment traces its options on the map. |
-| **Emission Hotspots** | Both | The same CO₂e re-sliced by product, port, gateway, market and mode, plus first-mile collection kept separate. |
-| **Lanes** | Both | Destination port × product category, ranked by what is still recoverable, with the network map and each lane's options. |
-| **Footprint & Evidence** | CSO | The reported total, its reconciliation bridge to the workbook, the factor table, the methodology, the stated assumptions, and the rows in the source that contradict themselves. |
+| **Control Tower** | Logistics lead | The network map over the full shipment register, split by a draggable divider. Selecting a shipment or lane shows every route option the workbook evidences — compare chart, option cards, and the leg-by-leg CO₂e maths with each figure's source cell. |
+| **Emission Hotspots** | All | Year-over-year total against intensity (click a year to drill into its months), the same CO₂e re-sliced by product, port, gateway, market and mode, seasonality, the gateway→mode→region flow, and first-mile collection kept separate. |
+| **Product & Destination Lanes** | All | Treemap by product or port, destination × mode, region × mode mekko, a lane-priority bubble chart, and the full lane table. |
+| **ESG Reporting** | CSO / analyst | The reported total, its reconciliation bridge to the workbook (as a table *and* a waterfall), actual against the best proven route, the factor table, the methodology, the stated assumptions, and the rows in the source that contradict themselves. |
 
-Plus a **persona switcher** (Logistics Lead / CSO), a global **filter bar** limited to dimensions the
-workbook holds, an **exceptions inbox** (air freight, part-load truck runs, duplicated rows), and
-**Ask Tradewind** — a keyword-routed assistant that answers only from the figures in view and says
-so when it cannot.
+Plus a **persona switcher** (Logistics Lead / CSO / Analyst), a global **filter bar** limited to
+dimensions the workbook holds, an **exceptions inbox** (air freight, part-load truck runs,
+duplicated rows), and **Ask Tradewind** — a keyword-routed assistant that answers only from the
+figures in view and says so when it cannot.
+
+There is no **Carrier & Vendor Performance** page and no procurement persona: the workbook names no
+vendor, processor or carrier, so there would be nothing real to rank. The Control Tower also loads
+unscoped — an earlier build gated it behind "apply a filter first", which meant arriving at an
+empty screen.
 
 ## Architecture
 
@@ -123,8 +128,9 @@ src/
   components/     layout, cards, charts, map, tables, filters, shared
   constants/      app, agents, nav, personas, actionTypes
   hooks/          useDataSource, useAsync, useDebouncedValue
-  modules/decarbonization/  pages/ (Decisions, Hotspots, Lanes, Evidence)
-                            components/ (DecisionCard, RouteOptionCard, LegTimeline, …)
+  modules/decarbonization/  pages/ (ControlTower, Hotspots, ProductCustomerLanes, EvidencePack)
+                            components/ (ShipmentsPanel, ScenarioCard, ShipmentLedgerSection,
+                                         LegTimeline, LaneDetailContent, …)
   services/
     dataSource.ts                 the contract every screen talks to
     dataSourceRegistry.ts         env-selected singleton (mock | api), safe fallback

@@ -101,7 +101,7 @@ const nf = (n) => Math.round(n).toLocaleString('en-US');
  * one is written in kilograms — "34 kg" instead of "0.03 t", which reads as
  * nothing. Mirrors `formatTonnes` in src/utils/format.ts.
  */
-const co2e = (t) => {
+const fmtCo2e = (t) => {
   const abs = Math.abs(t);
   if (abs >= 100) return `${nf(t)} t`;
   if (abs >= 10) return `${t.toFixed(1)} t`;
@@ -434,6 +434,8 @@ function rollup(s) {
     co2ePerTonne: s.weightTonnes > 0 ? r4(co2e / s.weightTonnes) : 0,
     co2ePerTonneKm: s.weightTonnes > 0 && totalKm > 0 ? r3((co2e * 1e6) / (s.weightTonnes * totalKm)) : 0,
     transitDaysEst: Math.round(sum(legs, (l) => l.transitDaysEst)),
+    // Derived, like transit itself — the workbook records no arrival date.
+    eta: addDays(s.date, Math.round(sum(legs, (l) => l.transitDaysEst))),
     dataConfidence: 'High',
     isAirFreight: legs.some((l) => l.mode === 'air'),
   };
@@ -644,7 +646,7 @@ for (const s of enriched) {
     optionKind: best.kind,
     optionId: best.id,
     title: TITLE[best.kind](s, best),
-    rationale: `${co2e(s.co2eTonnes)} → ${co2e(best.co2eTonnes)} CO₂e, saving ${co2e(saving)} `
+    rationale: `${fmtCo2e(s.co2eTonnes)} → ${fmtCo2e(best.co2eTonnes)} CO₂e, saving ${fmtCo2e(saving)} `
       + `(${Math.abs(best.co2eDeltaPct).toFixed(0)}%), with ${transitPhrase}.`,
     proof: best.evidence,
     proofRefs: best.evidenceRefs,
@@ -659,8 +661,8 @@ for (const s of enriched) {
     status: 'suggested',
     shipmentDate: s.date,
     evidence: [
-      { label: 'CO₂e today', value: co2e(s.co2eTonnes) },
-      { label: 'On this option', value: co2e(best.co2eTonnes), comparison: `${co2e(saving)} saved` },
+      { label: 'CO₂e today', value: fmtCo2e(s.co2eTonnes) },
+      { label: 'On this option', value: fmtCo2e(best.co2eTonnes), comparison: `${fmtCo2e(saving)} saved` },
       { label: 'Transit (est.)', value: `${best.transitDaysEst} days`, comparison: `${s.transitDaysEst} days today` },
       { label: 'Already used on', value: `${best.timesUsedInWorkbook} shipment${best.timesUsedInWorkbook === 1 ? '' : 's'}` },
     ],
@@ -677,7 +679,7 @@ for (const s of enriched) laneGroups.set(s.laneId, [...(laneGroups.get(s.laneId)
 
 const lanes = [...laneGroups.entries()].map(([laneId, rows]) => {
   const first = rows[0];
-  const co2e = sum(rows, (r) => r.co2eTonnes);
+  const laneCo2e = sum(rows, (r) => r.co2eTonnes);
   const weight = sum(rows, (r) => r.weightTonnes);
   const tkm = sum(rows, (r) => r.totalDistanceKm * r.weightTonnes);
   const years = uniq(rows.map((r) => r.reportingYear)).length;
@@ -706,19 +708,23 @@ const lanes = [...laneGroups.entries()].map(([laneId, rows]) => {
     modePath: rank(rows.map((r) => r.modePath.join('>')))[0].split('>'),
     hasAirFreight: rows.some((r) => r.isAirFreight),
     airShipmentCount: rows.filter((r) => r.isAirFreight).length,
+    airSharePct: laneCo2e > 0 ? r3((sum(rows.filter((r) => r.isAirFreight), (r) => r.co2eTonnes) / laneCo2e) * 100) : 0,
     shipmentCount: rows.length,
+    annualFrequency: r3(rows.length / Math.max(1, years)),
     plannedShipmentCount: planned.length,
     totalWeightTonnes: r3(weight),
-    totalCo2eTonnes: r6(co2e),
-    annualCo2eTonnes: r6(co2e / Math.max(1, years)),
-    avgCo2ePerTonne: weight > 0 ? r4(co2e / weight) : 0,
-    avgCo2ePerTonneKm: tkm > 0 ? r3((co2e * 1e6) / tkm) : 0,
+    totalCo2eTonnes: r6(laneCo2e),
+    annualCo2eTonnes: r6(laneCo2e / Math.max(1, years)),
+    avgCo2ePerTonne: weight > 0 ? r4(laneCo2e / weight) : 0,
+    avgCo2ePerTonneKm: tkm > 0 ? r3((laneCo2e * 1e6) / tkm) : 0,
     avgWeightTonnes: r3(weight / rows.length),
     avoidableTonnes: r6(avoidable),
-    avoidablePct: co2e > 0 ? r3((avoidable / co2e) * 100) : 0,
+    avoidablePct: laneCo2e > 0 ? r3((avoidable / laneCo2e) * 100) : 0,
     plannedAvoidableTonnes: r6(sum(planned, (r) => r.avoidableTonnes)),
     bestOptionKind: best.bestOptionKind,
     bestOptionLabel: best.bestOptionLabel,
+    currentPerShipmentTonnes: r6(best.co2eTonnes),
+    bestPerShipmentTonnes: r6(Math.max(0, best.co2eTonnes - best.avoidableTonnes)),
     coords: { origin: coord(first.origin), gateway: coord(gatewayName), destPort: coord(first.destPort) },
     _rows: rows,
   };
@@ -739,7 +745,7 @@ for (const s of enriched.filter((x) => x.isAirFreight)) {
     laneLabel: `${s.origin} → ${s.destPort}`,
     region: s.region,
     title: `${wt(s.weightTonnes)} flown to ${s.destPort}`,
-    detail: `${co2e(s.co2eTonnes)} CO₂e on ${s.date}. Air is charged at ${EF.air} kg CO₂e per tonne-km against `
+    detail: `${fmtCo2e(s.co2eTonnes)} CO₂e on ${s.date}. Air is charged at ${EF.air} kg CO₂e per tonne-km against `
       + `${EF.ocean} at sea — ${Math.round(EF.air / EF.ocean)}× more for every tonne carried.`,
     co2eTonnes: r6(s.co2eTonnes),
     avoidableTonnes: r6(s.avoidableTonnes),
@@ -758,7 +764,7 @@ for (const s of enriched.filter((x) => x.stream === 'export' && !x.isAirFreight 
     region: s.region,
     title: `${wt(s.weightTonnes)} on a ${Math.round(s.roadKm)} km dedicated truck run`,
     detail: `Road CO₂e is charged per truck run, so this ${wt(s.weightTonnes)} load carries the same `
-      + `${co2e(s.roadCo2eTonnes)} of road CO₂e that a full ${MAX_TRUCK_TONNES.toFixed(0)} t load would — `
+      + `${fmtCo2e(s.roadCo2eTonnes)} of road CO₂e that a full ${MAX_TRUCK_TONNES.toFixed(0)} t load would — `
       + `${Math.round((s.roadCo2eTonnes / s.co2eTonnes) * 100)}% of this shipment's whole footprint.`,
     co2eTonnes: r6(s.co2eTonnes),
     avoidableTonnes: r6(s.avoidableTonnes),
@@ -818,10 +824,11 @@ const emissionFactors = [
 const monthly = (() => {
   const byPeriod = new Map();
   for (const s of delivered) {
-    const hit = byPeriod.get(s.period) ?? { period: s.period, co2eTonnes: 0, weightTonnes: 0, tkm: 0 };
+    const hit = byPeriod.get(s.period) ?? { period: s.period, co2eTonnes: 0, weightTonnes: 0, tkm: 0, avoidable: 0 };
     hit.co2eTonnes += s.co2eTonnes;
     hit.weightTonnes += s.weightTonnes;
     hit.tkm += s.weightTonnes * s.totalDistanceKm;
+    hit.avoidable += s.avoidableTonnes;
     byPeriod.set(s.period, hit);
   }
   return [...byPeriod.values()].sort((a, b) => a.period.localeCompare(b.period)).map((p) => ({
@@ -829,6 +836,10 @@ const monthly = (() => {
     co2eTonnes: r6(p.co2eTonnes),
     weightTonnes: r3(p.weightTonnes),
     intensity: p.tkm > 0 ? r3((p.co2eTonnes * 1e6) / p.tkm) : 0,
+    avoidableTonnes: r6(p.avoidable),
+    // Not a "business as usual" baseline — the workbook has none. This is the
+    // same month re-costed on the best routing it evidences for each shipment.
+    ifBestTonnes: r6(Math.max(0, p.co2eTonnes - p.avoidable)),
   }));
 })();
 

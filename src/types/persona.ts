@@ -1,9 +1,12 @@
 /**
- * Persona registry — the "Viewing as" switcher. The workbook records movements,
- * not commercial partners, so the two personas it can genuinely serve are the
- * logistics lead who chooses routes and the CSO who reports the footprint.
+ * Persona registry — the "Viewing as" switcher. Every persona sees the whole
+ * company footprint; the persona changes the lens (landing page, focus KPIs,
+ * copilot tone), not the row set.
+ *
+ * There is no procurement persona because the workbook names no vendor,
+ * processor or carrier — that role would have nothing to act on.
  */
-export type PersonaId = 'logistics' | 'cso';
+export type PersonaId = 'cso' | 'logistics' | 'analyst';
 
 export interface PersonaDef {
   id: PersonaId;

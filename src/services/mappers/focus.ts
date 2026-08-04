@@ -58,7 +58,7 @@ export function buildFocusKpis(persona: PersonaId, ctx: FocusCtx): KpiMetric[] {
     ];
   }
 
-  // CSO — the reporting lens.
+  // CSO and analyst share the reporting lens.
   const dataIssues = exceptions.filter((e) => e.kind === 'data-quality').length;
   return [
     {

@@ -1,18 +1,26 @@
 import { useMemo, useState } from 'react';
 import { Box, Card, CardContent, MenuItem, Stack, TextField, Typography } from '@mui/material';
+import AccountTreeRounded from '@mui/icons-material/AccountTreeRounded';
+import GridOnRounded from '@mui/icons-material/GridOnRounded';
+import LayersRounded from '@mui/icons-material/LayersRounded';
 import LocalFireDepartmentRounded from '@mui/icons-material/LocalFireDepartmentRounded';
+import ShowChartRounded from '@mui/icons-material/ShowChartRounded';
+import TravelExploreRounded from '@mui/icons-material/TravelExploreRounded';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ScopeNote } from '@/components/layout/ScopeNote';
 import { FilterPanel } from '@/components/filters/FilterPanel';
+import { KpiCard } from '@/components/cards/KpiCard';
+import { EquivalentsStrip } from '@/components/cards/EquivalentsStrip';
 import { ChartContainer } from '@/components/charts/ChartContainer';
 import { BarList } from '@/components/charts/BarList';
-import { TreemapChart } from '@/components/charts/TreemapChart';
-import { ModeSplitDonut } from '@/components/charts/ModeSplitDonut';
-import { ModeTrendArea } from '@/components/charts/ModeTrendArea';
-import { HeatmapChart } from '@/components/charts/HeatmapChart';
-import { SankeyChart } from '@/components/charts/SankeyChart';
 import { IntensityRanking } from '@/components/charts/IntensityRanking';
-import { KpiCard } from '@/components/cards/KpiCard';
+import { TreemapChart } from '@/components/charts/TreemapChart';
+import { YearOverYearChart } from '@/components/charts/YearOverYearChart';
+import { MoMTrendChart } from '@/components/charts/MoMTrendChart';
+import { ModeTrendArea } from '@/components/charts/ModeTrendArea';
+import { ModeSplitDonut } from '@/components/charts/ModeSplitDonut';
+import { SankeyChart } from '@/components/charts/SankeyChart';
+import { HeatmapChart } from '@/components/charts/HeatmapChart';
 import { ChartSkeleton } from '@/components/loaders/Skeletons';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { useDataSource } from '@/hooks/useDataSource';
@@ -25,11 +33,21 @@ import {
   insightsForModeSplit,
   insightsForMonthlyByMode,
   insightsForRegionModes,
+  insightsForReportingYears,
   insightsForSeasonality,
 } from '@/utils/insights';
 import { formatTonnes } from '@/utils/format';
 
 const MODES = ['Ocean', 'Rail', 'Road', 'Air'] as const;
+
+const DIMENSIONS: { key: HotspotDimension; label: string; noun: string }[] = [
+  { key: 'byCategory', label: 'Product category', noun: 'product category' },
+  { key: 'byProduct', label: 'Product', noun: 'product' },
+  { key: 'byDestPort', label: 'Destination port', noun: 'destination port' },
+  { key: 'byMarket', label: 'Market', noun: 'destination market' },
+  { key: 'byGateway', label: 'Gateway port', noun: 'gateway port' },
+  { key: 'byMode', label: 'Transport mode', noun: 'transport mode' },
+];
 
 /** Chart-shape adapters — the charts speak label/value, the domain speaks CO₂e. */
 const toBars = (rows: HotspotRow[]) =>
@@ -44,15 +62,6 @@ const toIntensity = (rows: HotspotRow[]) =>
     .sort((a, b) => b.co2ePerTonneKm - a.co2ePerTonneKm)
     .map((r) => ({ label: r.label, value: r.co2ePerTonneKm, sub: formatTonnes(r.co2eTonnes) }));
 
-const DIMENSIONS: { key: HotspotDimension; label: string; noun: string }[] = [
-  { key: 'byCategory', label: 'Product category', noun: 'product category' },
-  { key: 'byProduct', label: 'Product', noun: 'product' },
-  { key: 'byDestPort', label: 'Destination port', noun: 'destination port' },
-  { key: 'byMarket', label: 'Market', noun: 'destination market' },
-  { key: 'byGateway', label: 'Gateway port', noun: 'gateway port' },
-  { key: 'byMode', label: 'Transport mode', noun: 'transport mode' },
-];
-
 /** Where the footprint actually sits, sliced by every dimension the workbook holds. */
 export default function HotspotsPage() {
   const ds = useDataSource();
@@ -60,19 +69,62 @@ export default function HotspotsPage() {
   const filters = useAppSelector((s) => s.filters.value);
   const { data: hotspots, status } = useAsync(() => ds.getHotspots({ persona, filters }), [persona, filters]);
   const { data: footprint } = useAsync(() => ds.getFootprint({ persona, filters }), [persona, filters]);
+  const { data: evidence } = useAsync(() => ds.getEvidence(), []);
   const [dimension, setDimension] = useState<HotspotDimension>('byCategory');
+  const [yearFocus, setYearFocus] = useState<string | null>(null);
 
   const dim = DIMENSIONS.find((d) => d.key === dimension)!;
   const rows = hotspots?.[dimension] ?? [];
   const collection = hotspots?.byCollectionOrigin ?? [];
 
+  // Clicking a year bar drills the monthly chart into that reporting year.
+  const monthlyRows = useMemo(() => {
+    const all = evidence?.monthly ?? [];
+    if (!yearFocus) return all;
+    const year = evidence?.years.find((y) => y.reportingYear === yearFocus);
+    if (!year) return all;
+    return all.filter((m) => m.period >= year.from.slice(0, 7) && m.period <= year.to.slice(0, 7));
+  }, [evidence, yearFocus]);
+
   const kpis = useMemo(() => {
     if (!footprint) return [];
     return [
-      { id: 'total', label: 'CO₂e in scope', value: footprint.totalCo2eTonnes, unit: 'tonnes' as const, intent: 'neutral' as const, hint: `${footprint.shipmentCount} movements`, icon: 'co2e' },
-      { id: 'avoidable', label: 'Avoidable on proven routes', value: footprint.avoidableTonnes, unit: 'tonnes' as const, intent: 'opportunity' as const, hint: `${footprint.avoidablePct}% of scope`, icon: 'decisioning' },
-      { id: 'road', label: 'Road legs', value: footprint.roadCo2eTonnes, unit: 'tonnes' as const, intent: 'risk' as const, hint: 'charged per truck run', icon: 'carrier' },
-      { id: 'intensity', label: 'Intensity', value: footprint.avgIntensity, unit: 'intensity' as const, intent: 'neutral' as const, hint: 'g CO₂e per tonne-km', icon: 'lanes' },
+      {
+        id: 'total',
+        label: 'CO₂e in scope',
+        value: footprint.totalCo2eTonnes,
+        unit: 'tonnes' as const,
+        intent: 'neutral' as const,
+        hint: `${footprint.shipmentCount} movements`,
+        icon: 'co2e',
+      },
+      {
+        id: 'avoidable',
+        label: 'Avoidable on proven routes',
+        value: footprint.avoidableTonnes,
+        unit: 'tonnes' as const,
+        intent: 'opportunity' as const,
+        hint: `${footprint.avoidablePct}% of scope`,
+        icon: 'decisioning',
+      },
+      {
+        id: 'road',
+        label: 'Road legs',
+        value: footprint.roadCo2eTonnes,
+        unit: 'tonnes' as const,
+        intent: 'risk' as const,
+        hint: 'charged per truck run',
+        icon: 'carrier',
+      },
+      {
+        id: 'intensity',
+        label: 'Intensity',
+        value: footprint.avgIntensity,
+        unit: 'intensity' as const,
+        intent: 'neutral' as const,
+        hint: 'g CO₂e per tonne-km',
+        icon: 'lanes',
+      },
     ];
   }, [footprint]);
 
@@ -81,7 +133,7 @@ export default function HotspotsPage() {
       <PageHeader
         overline="Understand · where the carbon sits"
         title="Emission Hotspots"
-        subtitle="The same CO₂e, sliced every way the workbook supports — product, port, gateway, market and mode."
+        subtitle="The same CO₂e, sliced every way the workbook supports — product, port, gateway, market and mode, over time."
         actions={<ScopeNote />}
       />
       <FilterPanel />
@@ -106,14 +158,57 @@ export default function HotspotsPage() {
         </Card>
       ) : (
         <Stack spacing={3}>
-          {/* Self-service ranking — one dimension picker, both a bar list and a treemap */}
+          {/* Trajectory first: total vs efficiency, then drill to months */}
+          <Box sx={{ display: 'grid', gap: 3, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' } }}>
+            <ChartContainer
+              title="Year over year"
+              subtitle="Bars are total CO₂e, the line is intensity — click a year to drill into its months"
+              icon={<ShowChartRounded sx={{ fontSize: 18 }} />}
+              insights={footprint ? insightsForReportingYears(footprint.byReportingYear) : undefined}
+            >
+              {footprint ? (
+                <YearOverYearChart
+                  data={footprint.byReportingYear.filter((y) => !y.reportingYear.includes('planned'))}
+                  onYearClick={(y) => setYearFocus((cur) => (cur === y ? null : y))}
+                  height={280}
+                />
+              ) : (
+                <ChartSkeleton height={280} />
+              )}
+            </ChartContainer>
+
+            <ChartContainer
+              title={yearFocus ? `Month by month · ${yearFocus}` : 'Month by month'}
+              subtitle={
+                yearFocus
+                  ? 'Click the same year bar again to show every month'
+                  : 'Every month the workbook covers · drag the brush to zoom'
+              }
+              icon={<ShowChartRounded sx={{ fontSize: 18 }} />}
+            >
+              {evidence ? (
+                <MoMTrendChart data={monthlyRows.map((m) => ({ label: m.period, value: m.co2eTonnes }))} height={280} />
+              ) : (
+                <ChartSkeleton height={280} />
+              )}
+            </ChartContainer>
+          </Box>
+
+          {/* Self-service ranking — one dimension picker, bar list + treemap */}
           <ChartContainer
             title={`CO₂e by ${dim.noun}`}
             subtitle="Ranked highest first · switch the dimension to re-slice the same emissions"
-            icon={<LocalFireDepartmentRounded sx={{ fontSize: 18 }} />}
+            icon={<LayersRounded sx={{ fontSize: 18 }} />}
             insights={insightsForHotspots(rows, dim.noun)}
             action={
-              <TextField select size="small" label="Slice by" value={dimension} onChange={(e) => setDimension(e.target.value as HotspotDimension)} sx={{ width: 190 }}>
+              <TextField
+                select
+                size="small"
+                label="Slice by"
+                value={dimension}
+                onChange={(e) => setDimension(e.target.value as HotspotDimension)}
+                sx={{ width: 190 }}
+              >
                 {DIMENSIONS.map((d) => (
                   <MenuItem key={d.key} value={d.key}>
                     {d.label}
@@ -148,7 +243,8 @@ export default function HotspotsPage() {
 
           <ChartContainer
             title="Monthly CO₂e by mode"
-            subtitle="Where the seasonal peaks fall"
+            subtitle="Where the seasonal peaks fall, and which mode drives them"
+            icon={<ShowChartRounded sx={{ fontSize: 18 }} />}
             insights={insightsForMonthlyByMode(hotspots.monthlyByMode)}
           >
             <ModeTrendArea data={hotspots.monthlyByMode} />
@@ -158,6 +254,7 @@ export default function HotspotsPage() {
             <ChartContainer
               title="Seasonality"
               subtitle="Mode × month — darker is heavier"
+              icon={<GridOnRounded sx={{ fontSize: 18 }} />}
               insights={insightsForSeasonality(hotspots.monthlyByMode)}
             >
               <SeasonalityHeatmap months={hotspots.monthlyByMode} />
@@ -166,6 +263,7 @@ export default function HotspotsPage() {
             <ChartContainer
               title="CO₂e by destination region"
               subtitle="Where the footprint lands"
+              icon={<TravelExploreRounded sx={{ fontSize: 18 }} />}
               insights={insightsForRegionModes(hotspots.regionModeMatrix)}
             >
               <BarList
@@ -178,10 +276,13 @@ export default function HotspotsPage() {
           <ChartContainer
             title="Gateway → mode → region"
             subtitle="How the CO₂e flows out of India and where it ends up"
+            icon={<AccountTreeRounded sx={{ fontSize: 18 }} />}
             insights={insightsForFlows(hotspots.flows)}
           >
             <SankeyChart flows={hotspots.flows} />
           </ChartContainer>
+
+          {footprint && <EquivalentsStrip tonnes={footprint.totalCo2eTonnes} />}
 
           {/* First-mile collection is inbound raw material — in the total, but not
               something a route decision can change, so it sits on its own. */}
@@ -199,10 +300,10 @@ export default function HotspotsPage() {
                       Why this is listed apart
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      These runs move raw chilli from the growing regions into the factory and collection stores. They belong in the
-                      reported footprint — {formatTonnes(collection.reduce((s, r) => s + r.co2eTonnes, 0))} across{' '}
+                      These runs move raw chilli from the growing regions into the factory and collection stores. They belong in
+                      the reported footprint — {formatTonnes(collection.reduce((s, r) => s + r.co2eTonnes, 0))} across{' '}
                       {collection.reduce((s, r) => s + r.shipments, 0)} monthly movements — but no gateway or sailing decision
-                      changes them, so they are kept out of the decision queue.
+                      changes them, so they are kept out of the route suggestions.
                     </Typography>
                   </CardContent>
                 </Card>

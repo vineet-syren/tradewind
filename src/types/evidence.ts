@@ -36,6 +36,14 @@ export interface MonthlyPoint {
   co2eTonnes: number;
   weightTonnes: number;
   intensity: number;
+  /** CO₂e that month that a workbook-evidenced option would have avoided. */
+  avoidableTonnes: number;
+  /**
+   * What the month would have been had every shipment taken its best evidenced
+   * option. The workbook holds no counterfactual baseline, so this — not an
+   * invented "business as usual" line — is what the trend is measured against.
+   */
+  ifBestTonnes: number;
 }
 
 export interface Methodology {

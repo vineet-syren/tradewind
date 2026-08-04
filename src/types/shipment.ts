@@ -44,6 +44,12 @@ export interface Shipment {
   period: string; // YYYY-MM
   year: number;
   date: string; // YYYY-MM-DD — dispatch date
+  /**
+   * Estimated arrival = dispatch + estimated transit. The workbook records no
+   * arrival date, so this is derived and carries the same caveat as
+   * `transitDaysEst`; no CO₂e depends on it.
+   */
+  eta: string; // YYYY-MM-DD
   status: 'Delivered' | 'Planned';
   productSku: string;
   productName: string;

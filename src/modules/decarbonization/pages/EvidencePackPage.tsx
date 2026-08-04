@@ -1,13 +1,19 @@
 import { Box, Card, CardContent, Chip, Divider, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import FactCheckRounded from '@mui/icons-material/FactCheckRounded';
+import WaterfallChartRounded from '@mui/icons-material/WaterfallChartRounded';
+import ShowChartRounded from '@mui/icons-material/ShowChartRounded';
 import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded';
 import InfoRoundedIcon from '@mui/icons-material/InfoRounded';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ScopeNote } from '@/components/layout/ScopeNote';
 import { ChartContainer } from '@/components/charts/ChartContainer';
 import { MoMTrendChart } from '@/components/charts/MoMTrendChart';
+import { YearOverYearChart } from '@/components/charts/YearOverYearChart';
+import { ReductionTrendChart } from '@/components/charts/ReductionTrendChart';
+import { WaterfallChart, type WaterfallStep } from '@/components/charts/WaterfallChart';
 import { KpiCard } from '@/components/cards/KpiCard';
+import { EquivalentsStrip } from '@/components/cards/EquivalentsStrip';
 import { ChartSkeleton } from '@/components/loaders/Skeletons';
 import { SeverityChip, SourceRef } from '@/components/shared/Chips';
 import { useDataSource } from '@/hooks/useDataSource';
@@ -36,6 +42,8 @@ export default function EvidencePackPage() {
   const latest = evidence.years.at(-1)!;
   const baseline = evidence.years[0];
   const dataIssues = (exceptions ?? []).filter((e) => e.kind === 'data-quality');
+  // Chart the year whose bridge actually has adjustments to show.
+  const bridgeYear = [...evidence.years].sort((a, b) => b.reconciliation.length - a.reconciliation.length)[0];
   const cut = evidence.changeSinceBaselinePct < 0;
 
   return (
@@ -143,27 +151,52 @@ export default function EvidencePackPage() {
         <Box sx={{ display: 'grid', gap: 3, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' } }}>
           <ChartContainer
             title="Reported footprint by year"
-            subtitle="The workbook's own Jul–Jun reporting windows"
+            subtitle="Bars are total CO₂e, the line is intensity — the workbook's own Jul–Jun windows"
+            icon={<ShowChartRounded sx={{ fontSize: 18 }} />}
             insights={footprint ? insightsForReportingYears(footprint.byReportingYear) : undefined}
           >
-            <MoMTrendChart
-              data={evidence.years.map((y) => ({ label: y.reportingYear, value: y.allLegsCo2eTonnes }))}
-              height={260}
-              zoomable={false}
-            />
+            {footprint ? (
+              <YearOverYearChart
+                data={footprint.byReportingYear.filter((y) => !y.reportingYear.includes('planned'))}
+                height={260}
+              />
+            ) : (
+              <ChartSkeleton height={260} />
+            )}
           </ChartContainer>
 
           <ChartContainer
-            title="Monthly CO₂e"
-            subtitle="Every month the workbook covers"
+            title="Actual against the best proven route"
+            subtitle="The dashed line is the same month re-costed on the lowest-carbon routing the workbook records — the gap is what was avoidable"
+            icon={<ShowChartRounded sx={{ fontSize: 18 }} />}
             insights={insightsForMonthlyTrend(evidence.monthly)}
           >
-            <MoMTrendChart
-              data={evidence.monthly.map((m) => ({ label: m.period, value: m.co2eTonnes }))}
-              height={260}
-            />
+            <ReductionTrendChart data={evidence.monthly} height={260} />
           </ChartContainer>
         </Box>
+
+        {/* The bridge as a waterfall — the same numbers as the table above, read
+            left to right. Shown for the year with the most adjustments, since a
+            year that ties exactly is just two identical bars. */}
+        <ChartContainer
+          title={`How ${bridgeYear.reportingYear} bridges to the reported total`}
+          subtitle={
+            bridgeYear.reconciliation.length > 2
+              ? 'Printed workbook total, the adjustments, and what Tradewind reports'
+              : 'This year needs no adjustment — the two totals are the same figure'
+          }
+          icon={<WaterfallChartRounded sx={{ fontSize: 18 }} />}
+        >
+          <WaterfallChart data={bridgeSteps(bridgeYear.reconciliation)} height={300} />
+        </ChartContainer>
+
+        <ChartContainer
+          title="Monthly CO₂e"
+          subtitle="Every month the workbook covers · drag the brush to zoom"
+          icon={<ShowChartRounded sx={{ fontSize: 18 }} />}
+        >
+          <MoMTrendChart data={evidence.monthly.map((m) => ({ label: m.period, value: m.co2eTonnes }))} height={260} />
+        </ChartContainer>
 
         {/* Emission factors, with the basis spelled out */}
         <ChartContainer title="Emission factors" subtitle="As stated in the workbook — the basis is what matters most">
@@ -297,6 +330,8 @@ export default function EvidencePackPage() {
           </ChartContainer>
         )}
 
+        <EquivalentsStrip tonnes={latest.allLegsCo2eTonnes} title={`What ${latest.reportingYear} amounts to`} />
+
         <Card>
           <CardContent>
             <Typography variant="caption" color="text.secondary">
@@ -310,6 +345,15 @@ export default function EvidencePackPage() {
       </Stack>
     </Box>
   );
+}
+
+/** The same reconciliation, shaped for the waterfall: first is the start, last the end. */
+function bridgeSteps(steps: ReconciliationStep[]): WaterfallStep[] {
+  return steps.map((s, i) => ({
+    label: s.label,
+    value: s.co2eTonnes,
+    kind: i === 0 ? 'start' : i === steps.length - 1 ? 'end' : 'delta',
+  }));
 }
 
 /** The bridge as a signed running total, so it can be checked by eye. */
