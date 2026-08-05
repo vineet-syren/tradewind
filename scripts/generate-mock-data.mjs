@@ -245,28 +245,71 @@ for (const year of src.years) {
 }
 
 /**
- * Inland routings to each gateway, taken from the FY23-24 tab only — the latest
- * reporting year, the one whose leg totals reconcile to the workbook's own
- * printed total to the last decimal, and the only tab whose depot labels are
- * internally consistent. Earlier tabs record the same run as both
- * "Hyderabad, 21 km" and "Hyderabad, 645 km", so they cannot define an option.
+ * Every inland chain the workbook records for each gateway — the factory-to-port
+ * routings a shipment could actually be put on, because other shipments were.
+ *
+ * All three tabs contribute, and that is deliberate: the tabs disagree about the
+ * same movement. "VKS Factory → Hyderabad" is 645 km on 69 FY21-22 rows, 21 km
+ * on 62 others, and 51 km to "ICD Hyderabad" on FY23-24. That disagreement is
+ * the single largest first-mile opportunity in the book (26.4 t CO₂e), so each
+ * chain carries the reporting years that evidence it and the option text names
+ * both distances rather than quietly picking one.
  */
 const INLAND_ROUTINGS = (() => {
-  const fy = src.years.find((y) => y.reportingYear === 'FY23-24');
   const byGateway = new Map();
-  for (const sh of fy.exportShipments) {
-    if (!sh.inland.length) continue;
-    const gw = sh.ocean.source;
-    const chain = sh.inland.map(inlandKey);
-    const bucket = byGateway.get(gw) ?? new Map();
-    const key = chain.join(' + ');
-    const hit = bucket.get(key) ?? { gateway: gw, chain, count: 0 };
-    hit.count += 1;
-    bucket.set(key, hit);
-    byGateway.set(gw, bucket);
+  for (const year of src.years) {
+    for (const sh of year.exportShipments) {
+      if (!sh.inland.length) continue;
+      const gw = sh.ocean.source;
+      const chain = sh.inland.map(inlandKey);
+      const bucket = byGateway.get(gw) ?? new Map();
+      const key = chain.join(' + ');
+      const hit = bucket.get(key) ?? { gateway: gw, chain, count: 0, years: new Set() };
+      hit.count += 1;
+      hit.years.add(year.reportingYear);
+      bucket.set(key, hit);
+      byGateway.set(gw, bucket);
+    }
   }
-  return new Map([...byGateway].map(([gw, b]) => [gw, [...b.values()].sort(byDesc((r) => r.count))]));
+  return new Map([...byGateway].map(([gw, b]) => [
+    gw,
+    [...b.values()].map((r) => ({ ...r, years: [...r.years].sort() })).sort(byDesc((r) => r.count)),
+  ]));
 })();
+
+/** Road + rail kilometres of a leg chain — how the first mile is described. */
+const inlandKmOf = (legs) => sum(legs.filter((l) => l.mode === 'road' || l.mode === 'rail'), (l) => l.distanceKm);
+
+/**
+ * Compare two leg chains mode by mode.
+ *
+ * Every "why this works" sentence has to account for the CO₂e it claims, and a
+ * chain change almost never moves all four modes. Quoting a blended inland
+ * distance — "1,347 km against 723 km" — hides that the whole saving is on the
+ * road leg and that the 702 km rail leg beside it did not move at all, at a
+ * factor sixty times smaller. So the modes are separated and only the ones that
+ * actually change get described.
+ */
+function compareChains(fromLegs, toLegs) {
+  const modes = ['road', 'rail', 'ocean', 'air'];
+  const of = (legs, m, f) => sum(legs.filter((l) => l.mode === m), f);
+  return modes
+    .map((mode) => ({
+      mode,
+      fromKm: r3(of(fromLegs, mode, (l) => l.distanceKm)),
+      toKm: r3(of(toLegs, mode, (l) => l.distanceKm)),
+      fromCo2e: of(fromLegs, mode, (l) => l.co2eTonnes),
+      toCo2e: of(toLegs, mode, (l) => l.co2eTonnes),
+    }))
+    .map((d) => ({ ...d, deltaKm: r3(d.toKm - d.fromKm), deltaCo2e: r6(d.toCo2e - d.fromCo2e) }))
+    .filter((d) => d.fromKm > 0 || d.toKm > 0);
+}
+
+/** "saves 370 kg" / "adds 12 kg" — the direction stated, not left to a sign. */
+const savingPhrase = (deltaCo2e) =>
+  deltaCo2e < 0 ? `saving ${fmtCo2e(-deltaCo2e)}` : `adding ${fmtCo2e(deltaCo2e)}`;
+/** Identity of a routing, so "the same chain as today" can be recognised. */
+const chainSig = (legs) => legs.map((l) => `${l.from}→${l.to}|${r3(l.distanceKm)}|${l.mode}`).join(' + ');
 
 /** Re-cost an inland routing for a weight, using the catalogue's own numbers. */
 function costInlandRouting(routing, weightTonnes, seqStart = 1) {
@@ -372,29 +415,69 @@ for (const year of src.years) {
   }
 }
 
-// ── To-be-planned shipments ────────────────────────────────────────────────
-// The workbook's last dispatch is 30 Jun 2024, so the app's "today" is 1 Jul
-// 2024 and the forward book is the FY23-24 July–September quarter rolled
-// forward 366 days. Product, weight, gateway, container and every distance stay
-// exactly as recorded; only the dates move.
-const LAST_DISPATCH = raw.map((s) => s.date).sort().at(-1);
-const APP_TODAY = addDays(LAST_DISPATCH, 1);
-const ROLL_DAYS = 366;
-const PLAN_QUARTER = ['2023-07', '2023-08', '2023-09'];
+// ══════════════════════════════════════════════════════════════════════════
+// 2b. The forward book — the only rows that are not from the workbook
+// ══════════════════════════════════════════════════════════════════════════
+//
+// The workbook is a closed record: it stops on 30 Jun 2024 and every row in it
+// has already shipped. There is nothing left to decide about any of them, so on
+// its own the application can only ever explain history.
+//
+// The forward book fixes that with the smallest possible addition: the FY23-24
+// export shipments dispatched between August and December, rolled forward three
+// years so they land in the Aug–Dec 2026 planning window. That is it. No
+// synthetic history, no filled-in years between the workbook and today — the
+// reported footprint stays exactly the workbook's own, and the only synthetic
+// rows in the whole dataset are ones a planner could still act on.
+//
+// Each is a real workbook shipment: product, weight, gateway, container, every
+// distance and every emission factor are the recorded shipment's, and each row
+// carries the cell range it came from. Only the dates move. Nothing is
+// modelled, forecast or randomly generated.
+const APP_TODAY = '2026-08-01';
+const LAST_WORKBOOK_DISPATCH = raw.map((s) => s.date).sort().at(-1);
 
-raw
-  .filter((s) => s.reportingYear === 'FY23-24' && s.stream === 'export' && PLAN_QUARTER.includes(s.date.slice(0, 7)))
-  .forEach((s, i) => {
-    raw.push({
-      ...s,
-      shipmentId: `PLN-${String(i + 1).padStart(3, '0')}`,
-      status: 'Planned',
-      reportingYear: 'FY24-25 (to be planned)',
-      date: addDays(s.date, ROLL_DAYS),
-      legs: s.legs.map((l) => ({ ...l })),
-      derivedFromRef: s.sourceRef,
-    });
+/** Same calendar date, `n` years on. 29 Feb clamps to 28 Feb in a common year. */
+function addYears(iso, n) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const target = new Date(Date.UTC(y + n, m - 1, d));
+  if (target.getUTCMonth() !== m - 1) target.setUTCDate(0); // 29 Feb → 28 Feb
+  return target.toISOString().slice(0, 10);
+}
+
+const ROLL_YEARS = 3;
+const PLAN_SOURCE_YEAR = 'FY23-24'; // the latest recorded year — the current network
+const PLAN_MONTHS = [8, 9, 10, 11, 12]; // August to December
+const PLAN_REPORTING_YEAR = 'FY26-27';
+/** Ceiling on the forward book, so the planning queue stays reviewable. */
+const PLAN_MAX = 30;
+
+for (const s of raw) s.dataOrigin = 'workbook';
+
+const plannedSeeds = raw
+  .filter(
+    (s) =>
+      s.dataOrigin === 'workbook' &&
+      s.reportingYear === PLAN_SOURCE_YEAR &&
+      s.stream === 'export' &&
+      PLAN_MONTHS.includes(Number(s.date.slice(5, 7))),
+  )
+  .sort((a, b) => a.date.localeCompare(b.date) || a.shipmentId.localeCompare(b.shipmentId))
+  .slice(0, PLAN_MAX);
+
+plannedSeeds.forEach((s, i) => {
+  raw.push({
+    ...s,
+    shipmentId: `PLN-${String(i + 1).padStart(3, '0')}`,
+    status: 'Planned',
+    reportingYear: PLAN_REPORTING_YEAR,
+    date: addYears(s.date, ROLL_YEARS),
+    legs: s.legs.map((l) => ({ ...l })),
+    dataOrigin: 'synthetic',
+    derivedFromRef: s.sourceRef,
+    mirrorsReportingYear: PLAN_SOURCE_YEAR,
   });
+});
 
 // ══════════════════════════════════════════════════════════════════════════
 // 3. Per-shipment rollups
@@ -441,6 +524,9 @@ function rollup(s) {
   };
 }
 
+/** The order the export chain physically runs in: inland first, long haul last. */
+const TRAVEL_ORDER = ['Road', 'Rail', 'Ocean', 'Air'];
+
 /** Lane = destination port × product category (collection keeps its own lanes). */
 const laneIdOf = (s) => (s.stream === 'collection'
   ? `LN-COL-${slug(s.origin)}-${slug(s.destPort)}`
@@ -454,11 +540,18 @@ let enriched = raw.map(rollup).map((s) => ({ ...s, laneId: laneIdOf(s) }));
 
 const OPTION_META = {
   current: { label: 'As booked today', tagline: 'The route this shipment is on' },
+  'shorter-first-mile': { label: 'Shorter first mile', tagline: 'Same gateway and sailing, shorter run to the port' },
   'gateway-swap': { label: 'Different gateway', tagline: 'Leave India through another port' },
   'shorter-sea': { label: 'Shorter sea routing', tagline: 'Same two ports, shorter sailing' },
   'sea-instead-of-air': { label: 'Send by sea', tagline: 'Ocean routing to the same country' },
   consolidate: { label: 'Share the truck', tagline: 'One truck run for the same-day shipments' },
 };
+
+/**
+ * Which lever each option pulls, in the order the cards are read. One card per
+ * lever: a shipment never shows two gateway swaps, it shows the best one.
+ */
+const OPTION_ORDER = ['shorter-first-mile', 'shorter-sea', 'gateway-swap', 'sea-instead-of-air', 'consolidate'];
 
 function finishOption(kind, legs, gateway, current, extra) {
   const co2e = sum(legs, (l) => l.co2eTonnes);
@@ -472,9 +565,10 @@ function finishOption(kind, legs, gateway, current, extra) {
     : OPTION_META[kind].label;
   const seaKm = sum(legs.filter((l) => l.mode === 'ocean' || l.mode === 'air'), (l) => l.distanceKm);
   return {
-    // Two options can share a kind (two gateways, or two recorded sailings for
-    // one port pair), so the id carries the gateway and the long-haul distance.
-    id: `${kind}:${slug(gateway ?? 'none')}:${Math.round(seaKm)}`,
+    // Two options can share a kind (two gateways, two recorded sailings for one
+    // port pair, or two inland chains to one gateway), so the id carries the
+    // gateway plus both the long-haul and the inland distance.
+    id: `${kind}:${slug(gateway ?? 'none')}:${Math.round(seaKm)}:${Math.round(inlandKmOf(legs))}`,
     kind,
     label,
     tagline: OPTION_META[kind].tagline,
@@ -488,6 +582,8 @@ function finishOption(kind, legs, gateway, current, extra) {
     co2eDeltaPct: current && current.co2eTonnes > 0 ? r3((delta / current.co2eTonnes) * 100) : 0,
     transitDeltaDays: current ? days - current.transitDaysEst : 0,
     isCurrent: kind === 'current',
+    /** Set once the whole candidate set is ranked — the lowest-CO₂e route. */
+    isOptimised: false,
     ...extra,
   };
 }
@@ -503,6 +599,19 @@ for (const s of enriched) {
   truckGroups.set(key, [...(truckGroups.get(key) ?? []), s]);
 }
 
+/**
+ * Price every routing the workbook evidences for one shipment.
+ *
+ * Each lever is isolated so a card only ever claims the change it makes: a
+ * "shorter sailing" keeps the shipment's own first mile, a "shorter first mile"
+ * keeps its own sailing, and only a gateway swap changes both — because it has
+ * to. Every candidate is priced, then the best instance of each lever survives,
+ * so a shipment shows at most one card per lever and never two gateway swaps.
+ *
+ * Returns `{ options, considered }`: the cards to show, and how many distinct
+ * routings were priced and rejected as no better. That count is what lets the
+ * app say "already the optimised route" instead of just showing nothing.
+ */
 function buildOptions(s) {
   const weight = s.weightTonnes;
   const current = finishOption('current', s.legs, s.gateway, null, {
@@ -510,11 +619,20 @@ function buildOptions(s) {
     evidence: `Recorded on tab ${s.sourceRef.split('!')[0]} of the workbook.`,
     evidenceRefs: [s.sourceRef],
   });
-  if (s.stream === 'collection') return [current];
+  if (s.stream === 'collection') {
+    // A collection run is a single road movement from a growing region — there
+    // is no gateway, sailing or mode to change, so the route it took is by
+    // definition the optimised one. It still has to carry the flag, or the UI
+    // reads "no optimised route" on a third of the register.
+    current.isOptimised = true;
+    return { options: [current], considered: 0 };
+  }
 
-  const options = [current];
-  // Only keep an option that actually beats what is booked today.
-  const add = (opt) => { if (opt.co2eDeltaTonnes < -1e-9) options.push(opt); };
+  const candidates = [];
+  const add = (opt) => candidates.push(opt);
+  const inlandLegs = s.legs.filter((l) => l.mode === 'road' || l.mode === 'rail');
+  const oceanLeg = s.legs.find((l) => l.mode === 'ocean');
+  const currentSig = chainSig(s.legs);
 
   // (a) Air → sea, where the workbook records a sailing to the same country.
   if (s.isAirFreight) {
@@ -522,50 +640,130 @@ function buildOptions(s) {
     const best = [...oceanCatalogue.values()]
       .filter((e) => DEST_MARKET[e.dest] === country)
       .sort((a, b) => a.distanceKm - b.distanceKm)[0];
-    const routing = best && (INLAND_ROUTINGS.get(best.source) ?? [])[0];
-    if (best && routing) {
+    // One candidate per inland chain to that gateway; the cheapest survives
+    // ranking. Taking the most-used chain instead would price the sea option on
+    // the 645 km first mile the tabs themselves contradict.
+    for (const routing of best ? (INLAND_ROUTINGS.get(best.source) ?? []) : []) {
       const legs = [...costInlandRouting(routing, weight), costPerTonneKmLeg(best, 'ocean', weight, 99)];
       add(finishOption('sea-instead-of-air', legs, best.source, current, {
         timesUsedInWorkbook: best.count,
-        evidence: `The workbook already ships to ${country} by sea on ${best.source} → ${best.dest} `
-          + `(${nf(best.distanceKm)} km, ${best.count} shipment${best.count === 1 ? '' : 's'}). Air is charged at `
-          + `${EF.air} kg CO₂e per tonne-km against ${EF.ocean} at sea — ${Math.round(EF.air / EF.ocean)}× more.`,
-        evidenceRefs: best.refs,
+        // The mode swap is the headline, but it is not always the whole story:
+        // reaching a seaport can mean a completely different inland run from the
+        // one to the airport, and on a light shipment that road change can carry
+        // more of the saving than the flight does. Both are stated, largest first.
+        evidence: (() => {
+          const diff = compareChains(s.legs, legs).filter((d) => Math.abs(d.deltaCo2e) > 1e-9);
+          const ranked = [...diff].sort((a, b) => Math.abs(b.deltaCo2e) - Math.abs(a.deltaCo2e));
+          const air = diff.find((d) => d.mode === 'air');
+          const inland = ranked.filter((d) => d.mode === 'road' || d.mode === 'rail');
+          return (
+            `Air is charged at ${EF.air} kg CO₂e per tonne-km against ${EF.ocean} at sea — `
+            + `${Math.round(EF.air / EF.ocean)}× more for every tonne carried. Taking this ${wt(weight)} off the plane `
+            + `and onto the ${nf(best.distanceKm)} km ${best.source} → ${best.dest} sailing `
+            + `${air
+              ? `cuts the long haul alone from ${fmtCo2e(air.fromCo2e)} to `
+                + `${fmtCo2e(diff.find((d) => d.mode === 'ocean')?.toCo2e ?? 0)}. `
+              : '. '}`
+            + (inland.length
+              ? `Reaching a seaport also changes the inland run — `
+                + `${inland.map((d) => `${d.mode} ${nf(d.fromKm)} km → ${nf(d.toKm)} km, ${savingPhrase(d.deltaCo2e)}`).join('; ')}`
+                + `${inland.some((d) => d.mode === 'road') ? ', road being charged per truck run rather than per tonne' : ''}. `
+              : '')
+            + `The workbook already ships to ${country} by sea (${best.count} shipment${best.count === 1 ? '' : 's'}) and `
+            + `reaches ${best.source} overland on ${routing.count} shipment${routing.count === 1 ? '' : 's'} `
+            + `(${routing.years.join(', ')}). The trade is time: sea takes weeks where the flight took days, so this only `
+            + `works where the delivery date allows it.`
+          );
+        })(),
+        evidenceRefs: uniq([...best.refs, ...routing.chain.map((k) => inlandCatalogue.get(k).refs[0])]),
       }));
     }
-    return options;
+    return rankOptions(current, candidates);
   }
 
-  // (b) Gateway and sailing swaps — reach the same destination port through any
-  //     gateway whose sailing to it the workbook records.
+  // (b) Shorter first mile — same gateway, same sailing, a different inland
+  //     chain the workbook records for that gateway. This is where the tabs'
+  //     disagreement about the factory-to-depot run turns into real tonnes.
+  if (s.gateway && oceanLeg) {
+    for (const routing of INLAND_ROUTINGS.get(s.gateway) ?? []) {
+      const legs = [...costInlandRouting(routing, weight), { ...oceanLeg }];
+      if (chainSig(legs) === currentSig) continue; // that is the current first mile
+      // Name the modes that actually move, and the one that does not — the rail
+      // haul is usually identical, and saying so is what makes the road figure
+      // beside it mean something.
+      const diff = compareChains(s.legs, legs);
+      const moved = diff.filter((d) => d.mode !== 'ocean' && Math.abs(d.deltaKm) > 0.5);
+      const unchanged = diff.filter((d) => d.mode !== 'ocean' && Math.abs(d.deltaKm) <= 0.5 && d.fromKm > 0);
+      add(finishOption('shorter-first-mile', legs, s.gateway, current, {
+        timesUsedInWorkbook: routing.count,
+        evidence: `Same gateway, same sailing — only the run to ${s.gateway} changes. `
+          + moved
+            .map(
+              (d) => `The ${d.mode} leg goes from ${nf(d.fromKm)} km to ${nf(d.toKm)} km, ${savingPhrase(d.deltaCo2e)}`
+                + ` at ${EF[d.mode]} kg CO₂e per ${d.mode === 'road' ? 'km whatever the load' : 'tonne-km'}.`,
+            )
+            .join(' ')
+          + (unchanged.length
+            ? ` The ${unchanged.map((d) => `${d.mode} leg (${nf(d.fromKm)} km)`).join(' and ')} `
+              + `${unchanged.length === 1 ? 'is' : 'are'} unchanged.`
+            : '')
+          + ` The workbook runs this shorter chain on ${routing.count} shipment${routing.count === 1 ? '' : 's'} `
+          + `(${routing.years.join(', ')}), so it is a route the business has already used, not a proposal.`,
+        evidenceRefs: routing.chain.map((k) => inlandCatalogue.get(k).refs[0]),
+      }));
+    }
+  }
+
+  // (c) Shorter sailing — same gateway, a different sea distance the workbook
+  //     records for the same port pair. The first mile is left exactly as booked.
+  if (oceanLeg) {
+    for (const oceanEntry of oceanOptionsTo(s.destPort)) {
+      if (oceanEntry.source !== s.gateway) continue;
+      if (Math.abs(oceanEntry.distanceKm - oceanLeg.distanceKm) < 0.5) continue;
+      const legs = [...inlandLegs.map((l) => ({ ...l })), costPerTonneKmLeg(oceanEntry, 'ocean', weight, 99)];
+      const seaDelta = oceanLeg.distanceKm - oceanEntry.distanceKm;
+      const seaSaving = oceanLeg.co2eTonnes - legs[legs.length - 1].co2eTonnes;
+      add(finishOption('shorter-sea', legs, s.gateway, current, {
+        timesUsedInWorkbook: oceanEntry.count,
+        evidence: `The workbook records two different sailing distances for ${oceanEntry.source} → ${oceanEntry.dest}: `
+          + `${nf(oceanEntry.distanceKm)} km on ${oceanEntry.count} shipment${oceanEntry.count === 1 ? '' : 's'}, against `
+          + `${nf(oceanLeg.distanceKm)} km on this one — ${nf(Math.abs(seaDelta))} km `
+          + `${seaDelta > 0 ? 'less' : 'more'} at sea. The whole change is the ocean leg: at ${EF.ocean} kg CO₂e per `
+          + `tonne-km on ${wt(weight)}, that is ${fmtCo2e(Math.abs(seaSaving))} ${seaSaving > 0 ? 'saved' : 'added'}. `
+          + `Same two ports, same gateway, and the inland run is untouched.`,
+        evidenceRefs: oceanEntry.refs.slice(0, 3),
+      }));
+    }
+  }
+
+  // (d) Gateway swap — leave India through another port, on an inland chain
+  //     that port already uses. Both the inland run and the sailing change.
   for (const oceanEntry of oceanOptionsTo(s.destPort)) {
+    if (oceanEntry.source === s.gateway) continue;
     for (const routing of INLAND_ROUTINGS.get(oceanEntry.source) ?? []) {
-      const sameGateway = oceanEntry.source === s.gateway;
-      const sameSea = Math.abs(oceanEntry.distanceKm - s.oceanKm) < 0.5;
-      if (sameGateway && sameSea) continue; // that is the current route
       const legs = [...costInlandRouting(routing, weight), costPerTonneKmLeg(oceanEntry, 'ocean', weight, 99)];
-      const railKm = sum(legs.filter((l) => l.mode === 'rail'), (l) => l.distanceKm);
-      const roadKm = sum(legs.filter((l) => l.mode === 'road'), (l) => l.distanceKm);
-      const seaDelta = s.oceanKm - oceanEntry.distanceKm;
-
-      // State only what actually changes, so the sentence is always true of the
-      // legs beside it: the inland swap, the sea distance, or both.
-      const inlandPart = sameGateway ? '' :
-        `Reaching ${oceanEntry.source} takes ${Math.round(roadKm)} km by road`
-        + `${railKm ? ` then ${Math.round(railKm)} km by rail` : ''}, against ${Math.round(s.roadKm)} km of road`
-        + `${s.railKm ? ` and ${Math.round(s.railKm)} km of rail` : ''} today. `
-        + `Road is charged ${EF.road} kg CO₂e per km whatever the load`
-        + `${railKm ? `, rail ${EF.rail} kg per tonne-km` : ''}. `;
-      const seaPart = Math.abs(seaDelta) < 0.5 ? `The sailing is unchanged at ${nf(oceanEntry.distanceKm)} km.`
-        : `${oceanEntry.source} → ${oceanEntry.dest} is ${nf(oceanEntry.distanceKm)} km against `
-          + `${nf(s.oceanKm)} km today — ${nf(Math.abs(seaDelta))} km ${seaDelta > 0 ? 'less' : 'more'} at sea.`;
-      const usedPart = ` The workbook already sails ${oceanEntry.source} → ${oceanEntry.dest} `
-        + `${oceanEntry.count} time${oceanEntry.count === 1 ? '' : 's'}`
-        + `${sameGateway ? '' : `, and runs that inland chain on ${routing.count} shipment${routing.count === 1 ? '' : 's'}`}.`;
-
-      add(finishOption(sameGateway ? 'shorter-sea' : 'gateway-swap', legs, oceanEntry.source, current, {
-        timesUsedInWorkbook: Math.min(oceanEntry.count, sameGateway ? oceanEntry.count : routing.count),
-        evidence: inlandPart + seaPart + usedPart,
+      // Attribute the change leg by leg. A gateway swap moves the inland run and
+      // the sailing at once, and which of the two carries the saving flips with
+      // the load: on a light shipment the road leg dominates because it is
+      // charged per truck, on a heavy one the sea distance does.
+      const diff = compareChains(s.legs, legs);
+      const changed = diff.filter((d) => Math.abs(d.deltaCo2e) > 1e-9);
+      const dominant = [...changed].sort((a, b) => Math.abs(b.deltaCo2e) - Math.abs(a.deltaCo2e))[0];
+      const describe = (d) => {
+        if (d.fromKm === 0) return `${nf(d.toKm)} km of ${d.mode} is added, ${savingPhrase(d.deltaCo2e)}`;
+        if (d.toKm === 0) return `the ${nf(d.fromKm)} km ${d.mode} leg goes away, ${savingPhrase(d.deltaCo2e)}`;
+        return `${d.mode} goes from ${nf(d.fromKm)} km to ${nf(d.toKm)} km, ${savingPhrase(d.deltaCo2e)}`;
+      };
+      add(finishOption('gateway-swap', legs, oceanEntry.source, current, {
+        timesUsedInWorkbook: Math.min(oceanEntry.count, routing.count),
+        evidence: `Leaving through ${oceanEntry.source} instead of ${s.gateway ?? 'the current gateway'} changes both the `
+          + `inland run and the sailing: ${changed.map(describe).join('; ')}. `
+          + (dominant
+            ? `Most of the difference is the ${dominant.mode} leg${dominant.mode === 'road' ? ', which is charged per truck run rather than per tonne, so the distance driven is the whole of it' : ` at ${EF[dominant.mode]} kg CO₂e per tonne-km on ${wt(weight)}`}. `
+            : '')
+          + `The workbook already sails ${oceanEntry.source} → ${oceanEntry.dest} ${oceanEntry.count} `
+          + `time${oceanEntry.count === 1 ? '' : 's'} and runs that inland chain on ${routing.count} `
+          + `shipment${routing.count === 1 ? '' : 's'}, so both halves of this route are ones it has already used.`,
         evidenceRefs: uniq([
           ...oceanEntry.refs.slice(0, 2),
           ...routing.chain.map((k) => inlandCatalogue.get(k).refs[0]),
@@ -574,7 +772,7 @@ function buildOptions(s) {
     }
   }
 
-  // (c) Consolidation — the workbook's road factor is per truck run, so
+  // (e) Consolidation — the workbook's road factor is per truck run, so
   //     same-day shipments through one gateway that fit one load can share it.
   const group = truckGroups.get(`${s.date}|${s.gateway}|${s.status}`) ?? [];
   const groupWeight = sum(group, (g) => g.weightTonnes);
@@ -585,21 +783,50 @@ function buildOptions(s) {
       : { ...l }));
     add(finishOption('consolidate', legs, s.gateway, current, {
       timesUsedInWorkbook: group.length,
-      evidence: `${group.length} shipments leave through ${s.gateway} on ${s.date} totalling ${wt(groupWeight)}, `
-        + `inside the ${MAX_TRUCK_TONNES.toFixed(1)} t heaviest load the workbook records. Road CO₂e is charged per truck `
-        + `run, so one run instead of ${group.length} splits it ${group.length} ways.`,
+      evidence: `${group.length} shipments leave through ${s.gateway} on ${s.date} and together weigh `
+        + `${groupWeight.toFixed(2)} t, which fits the ${MAX_TRUCK_TONNES.toFixed(2)} t heaviest single load the workbook `
+        + `records — so one truck can carry all ${group.length}. Road CO₂e is charged per truck run and not per tonne `
+        + `carried, so running one instead of ${group.length} divides this shipment's ${fmtCo2e(s.roadCo2eTonnes)} of road `
+        + `CO₂e by ${group.length}. Nothing else about the route changes, and the sailing is untouched.`,
       evidenceRefs: group.map((g) => g.sourceRef).slice(0, 4),
     }));
   }
 
-  return options.sort((a, b) => (a.isCurrent ? -1 : b.isCurrent ? 1 : a.co2eTonnes - b.co2eTonnes));
+  return rankOptions(current, candidates);
+}
+
+/**
+ * Rank the priced candidates into the cards a user sees.
+ *
+ * One card per lever — the lowest-CO₂e instance of it — and only levers that
+ * actually beat what is booked today. A routing that costs more is not offered;
+ * it is counted in `considered`, which is how the app can say the current route
+ * is already the optimised one and how many alternatives that claim rests on.
+ */
+function rankOptions(current, candidates) {
+  const bestPerKind = new Map();
+  for (const c of candidates) {
+    const held = bestPerKind.get(c.kind);
+    if (!held || c.co2eTonnes < held.co2eTonnes) bestPerKind.set(c.kind, c);
+  }
+  const ranked = OPTION_ORDER.map((k) => bestPerKind.get(k)).filter(Boolean);
+  const better = ranked.filter((o) => o.co2eDeltaTonnes < -1e-9).sort((a, b) => a.co2eTonnes - b.co2eTonnes);
+
+  // The optimised route is the lowest-CO₂e routing on the table — which is the
+  // current one whenever nothing beats it.
+  (better[0] ?? current).isOptimised = true;
+
+  return {
+    options: [current, ...better],
+    considered: uniq(candidates.map((c) => c.id)).length,
+  };
 }
 
 const optionsById = new Map();
 enriched = enriched.map((s) => {
-  const options = buildOptions(s);
+  const { options, considered } = buildOptions(s);
   optionsById.set(s.shipmentId, options);
-  const best = options.find((o) => !o.isCurrent);
+  const best = options.find((o) => o.isOptimised && !o.isCurrent);
   const avoidable = best ? -best.co2eDeltaTonnes : 0;
   return {
     ...s,
@@ -607,6 +834,10 @@ enriched = enriched.map((s) => {
     avoidablePct: s.co2eTonnes > 0 ? r3((avoidable / s.co2eTonnes) * 100) : 0,
     bestOptionKind: best?.kind ?? null,
     bestOptionLabel: best?.label ?? null,
+    // Distinct routings the workbook evidences for this shipment that were
+    // priced. Lets the app distinguish "already the lowest of 3 routings" from
+    // "the workbook records no other way to move this".
+    alternativesConsidered: considered,
   };
 });
 
@@ -614,8 +845,12 @@ enriched = enriched.map((s) => {
 // 5. Recommendations — one per shipment with a better evidenced option
 // ══════════════════════════════════════════════════════════════════════════
 
-const COMPLEXITY = { 'gateway-swap': 'Medium', 'shorter-sea': 'Low', 'sea-instead-of-air': 'Medium', consolidate: 'Low' };
+const COMPLEXITY = {
+  'shorter-first-mile': 'Low', 'gateway-swap': 'Medium', 'shorter-sea': 'Low',
+  'sea-instead-of-air': 'Medium', consolidate: 'Low',
+};
 const TITLE = {
+  'shorter-first-mile': (s, o) => `Run the shorter first mile to ${o.gateway}`,
   'gateway-swap': (s, o) => (o.modePath.includes('Rail')
     ? `Rail it out through ${o.gateway} instead of trucking to ${s.gateway}`
     : `Route through ${o.gateway} instead of ${s.gateway}`),
@@ -626,7 +861,7 @@ const TITLE = {
 
 const recommendations = [];
 for (const s of enriched) {
-  const best = (optionsById.get(s.shipmentId) ?? []).find((o) => !o.isCurrent);
+  const best = (optionsById.get(s.shipmentId) ?? []).find((o) => o.isOptimised && !o.isCurrent);
   if (!best) continue;
   const saving = -best.co2eDeltaTonnes;
   const transitPhrase = best.transitDeltaDays === 0
@@ -712,8 +947,23 @@ const lanes = [...laneGroups.entries()].map(([laneId, rows]) => {
     shipmentCount: rows.length,
     annualFrequency: r3(rows.length / Math.max(1, years)),
     plannedShipmentCount: planned.length,
+    workbookShipmentCount: rows.filter((r) => r.dataOrigin === 'workbook').length,
+    syntheticShipmentCount: rows.filter((r) => r.dataOrigin === 'synthetic').length,
     totalWeightTonnes: r3(weight),
     totalCo2eTonnes: r6(laneCo2e),
+    // Per-mode split of the lane's own CO₂e. Charts must attribute by the leg
+    // that produced the emissions, not by the lane's dominant mode — otherwise
+    // the road share, which is the part a routing decision moves, disappears
+    // behind the ocean leg that outweighs it.
+    roadCo2eTonnes: r6(sum(rows, (r) => r.roadCo2eTonnes)),
+    railCo2eTonnes: r6(sum(rows, (r) => r.railCo2eTonnes)),
+    oceanCo2eTonnes: r6(sum(rows, (r) => r.oceanCo2eTonnes)),
+    airCo2eTonnes: r6(sum(rows, (r) => r.airCo2eTonnes)),
+    // Every mode the lane has used, in travel order. Concatenating the shipments'
+    // own paths is not enough: different shipments visit modes in different
+    // orders, so the merged list can come out "Road › Ocean › Rail". The export
+    // chain always runs inland-then-long-haul, so it is sorted on that.
+    modesUsed: uniq(rows.flatMap((r) => r.modePath)).sort((a, b) => TRAVEL_ORDER.indexOf(a) - TRAVEL_ORDER.indexOf(b)),
     annualCo2eTonnes: r6(laneCo2e / Math.max(1, years)),
     avgCo2ePerTonne: weight > 0 ? r4(laneCo2e / weight) : 0,
     avgCo2ePerTonneKm: tkm > 0 ? r3((laneCo2e * 1e6) / tkm) : 0,
@@ -736,7 +986,12 @@ const lanes = [...laneGroups.entries()].map(([laneId, rows]) => {
 
 const exceptions = [];
 
-for (const s of enriched.filter((x) => x.isAirFreight)) {
+// Synthetic *delivered* rows are mirrors of workbook rows that are already
+// listed here, so raising the same exception again would just triple the count.
+// Workbook history and the forward book both stay in.
+const exceptionRows = enriched.filter((s) => s.dataOrigin === 'workbook' || s.status === 'Planned');
+
+for (const s of exceptionRows.filter((x) => x.isAirFreight)) {
   exceptions.push({
     id: `EXC-AIR-${s.shipmentId}`,
     kind: 'air',
@@ -754,7 +1009,7 @@ for (const s of enriched.filter((x) => x.isAirFreight)) {
 }
 
 // Dedicated truck runs for a fraction of a load — the road factor is per run.
-for (const s of enriched.filter((x) => x.stream === 'export' && !x.isAirFreight && x.weightTonnes < 1 && x.roadCo2eTonnes > 0)) {
+for (const s of exceptionRows.filter((x) => x.stream === 'export' && !x.isAirFreight && x.weightTonnes < 1 && x.roadCo2eTonnes > 0)) {
   exceptions.push({
     id: `EXC-LOAD-${s.shipmentId}`,
     kind: 'low-load',
@@ -797,6 +1052,8 @@ exceptions.sort((a, b) => (b.avoidableTonnes || b.co2eTonnes) - (a.avoidableTonn
 const exportRows = enriched.filter((s) => s.stream === 'export');
 const delivered = enriched.filter((s) => s.status === 'Delivered');
 const planned = enriched.filter((s) => s.status === 'Planned');
+/** Rows read straight from the sheet — the only ones the report may quote. */
+const fromWorkbook = enriched.filter((s) => s.dataOrigin === 'workbook');
 
 const emissionFactors = [
   {
@@ -824,7 +1081,8 @@ const emissionFactors = [
 const monthly = (() => {
   const byPeriod = new Map();
   for (const s of delivered) {
-    const hit = byPeriod.get(s.period) ?? { period: s.period, co2eTonnes: 0, weightTonnes: 0, tkm: 0, avoidable: 0 };
+    const hit = byPeriod.get(s.period)
+      ?? { period: s.period, co2eTonnes: 0, weightTonnes: 0, tkm: 0, avoidable: 0, dataOrigin: s.dataOrigin };
     hit.co2eTonnes += s.co2eTonnes;
     hit.weightTonnes += s.weightTonnes;
     hit.tkm += s.weightTonnes * s.totalDistanceKm;
@@ -833,6 +1091,9 @@ const monthly = (() => {
   }
   return [...byPeriod.values()].sort((a, b) => a.period.localeCompare(b.period)).map((p) => ({
     period: p.period,
+    // Months never mix the two: the workbook ends 2024-06 and the mirror starts
+    // 2024-07, so a month is wholly recorded or wholly synthetic.
+    dataOrigin: p.dataOrigin,
     co2eTonnes: r6(p.co2eTonnes),
     weightTonnes: r3(p.weightTonnes),
     intensity: p.tkm > 0 ? r3((p.co2eTonnes * 1e6) / p.tkm) : 0,
@@ -843,6 +1104,34 @@ const monthly = (() => {
   }));
 })();
 
+/** "FY21-22, FY22-23 and FY23-24" — for prose about the recorded years. */
+const ASSUMPTION_FY_LIST = (s) => {
+  const ys = s.years.map((y) => y.reportingYear);
+  return ys.length > 1 ? `${ys.slice(0, -1).join(', ')} and ${ys.at(-1)}` : ys[0];
+};
+
+/** CO₂e split by any key, biggest first — the shape the report tables want. */
+function laneShares(rows, key) {
+  const agg = new Map();
+  const grand = sum(rows, (r) => r.co2eTonnes);
+  for (const r of rows) {
+    const k = key(r);
+    const hit = agg.get(k) ?? { label: k, co2eTonnes: 0, weightTonnes: 0, shipments: 0 };
+    hit.co2eTonnes += r.co2eTonnes;
+    hit.weightTonnes += r.weightTonnes;
+    hit.shipments += 1;
+    agg.set(k, hit);
+  }
+  return [...agg.values()]
+    .map((v) => ({
+      ...v,
+      co2eTonnes: r6(v.co2eTonnes),
+      weightTonnes: r3(v.weightTonnes),
+      pct: grand > 0 ? r3((v.co2eTonnes / grand) * 100) : 0,
+    }))
+    .sort(byDesc((v) => v.co2eTonnes));
+}
+
 /**
  * Bridge each tab's printed total to the total the app reports. Two tabs
  * annotate their export road block "handled by external SP" and leave it out of
@@ -851,7 +1140,9 @@ const monthly = (() => {
  * itemised so a reviewer can tie the numbers out.
  */
 const evidenceYears = src.years.map((y) => {
-  const rows = enriched.filter((s) => s.reportingYear === y.reportingYear);
+  // Workbook rows only. The synthetic mirror years carry the same reporting-year
+  // shape but must never reach a figure that claims to tie to the sheet.
+  const rows = fromWorkbook.filter((s) => s.reportingYear === y.reportingYear);
   const dates = rows.map((r) => r.date).sort();
   const allLegs = sum(rows, (r) => r.co2eTonnes);
   const tkm = sum(rows, (r) => r.weightTonnes * r.totalDistanceKm);
@@ -913,30 +1204,70 @@ const evidenceYears = src.years.map((y) => {
     weightTonnes: r3(sum(rows, (r) => r.weightTonnes)),
     shipments: rows.length,
     intensity: tkm > 0 ? r3((allLegs * 1e6) / tkm) : 0,
+    avoidableTonnes: r6(sum(rows, (r) => r.avoidableTonnes)),
+    airShipments: rows.filter((r) => r.isAirFreight).length,
+    // The four mode figures are a split of the year and must exhaust it, so each
+    // one counts *legs of that mode* — not shipments of that character. An air
+    // shipment also has a truck run to the airport, and counting its whole
+    // footprint here would put that road leg in two columns at once.
+    roadCo2eTonnes: r6(sum(rows, (r) => r.roadCo2eTonnes)),
+    railCo2eTonnes: r6(sum(rows, (r) => r.railCo2eTonnes)),
+    oceanCo2eTonnes: r6(sum(rows, (r) => r.oceanCo2eTonnes)),
+    airCo2eTonnes: r6(sum(rows, (r) => r.airCo2eTonnes)),
+    /** Whole footprint of the shipments that flew — the narrative figure. */
+    flownShipmentCo2eTonnes: r6(sum(rows.filter((r) => r.isAirFreight), (r) => r.co2eTonnes)),
+    exportShipments: rows.filter((r) => r.stream === 'export').length,
+    collectionShipments: rows.filter((r) => r.stream === 'collection').length,
+    // Per-mode and per-slice detail so a year can be reported on its own.
+    byCategory: laneShares(rows, (r) => r.category),
+    byDestPort: laneShares(rows, (r) => r.destPort),
+    byGateway: laneShares(rows, (r) => r.gateway ?? 'No gateway (air / collection)'),
+    byMode: laneShares(rows, (r) => r.primaryMode),
   };
 });
 const firstYear = evidenceYears[0];
 const lastYear = evidenceYears.at(-1);
+
+const syntheticRows = enriched.filter((s) => s.dataOrigin === 'synthetic');
 
 const ASSUMPTIONS = {
   asOf: APP_TODAY,
   company: 'Terova',
   workbook: src.source.workbook,
   scope: 'Scope 3 · Category 9 — Downstream transportation & distribution',
-  dataFrom: delivered.map((s) => s.date).sort()[0],
-  dataTo: LAST_DISPATCH,
+  /** Range of the recorded data — what the report is allowed to quote. */
+  dataFrom: fromWorkbook.map((s) => s.date).sort()[0],
+  dataTo: LAST_WORKBOOK_DISPATCH,
+  /** Range of everything on screen, recorded plus synthetic continuation. */
+  timelineFrom: enriched.map((s) => s.date).sort()[0],
+  timelineTo: enriched.map((s) => s.date).sort().at(-1),
   reportingYears: src.years.map((y) => y.reportingYear),
+  /** Every reporting year on screen, with where its rows come from. */
+  reportingYearOrigins: [
+    ...src.years.map((y) => ({ reportingYear: y.reportingYear, dataOrigin: 'workbook', mirrorsReportingYear: null })),
+    { reportingYear: PLAN_REPORTING_YEAR, dataOrigin: 'synthetic', mirrorsReportingYear: PLAN_SOURCE_YEAR },
+  ],
   latestReportingYear: lastYear.reportingYear,
-  totalCo2eTonnes: r6(sum(delivered, (s) => s.co2eTonnes)),
+  totalCo2eTonnes: r6(sum(fromWorkbook, (s) => s.co2eTonnes)),
   latestYearCo2eTonnes: lastYear.allLegsCo2eTonnes,
+  syntheticCo2eTonnes: r6(sum(syntheticRows, (s) => s.co2eTonnes)),
+  syntheticShipmentCount: syntheticRows.length,
+  workbookShipmentCount: fromWorkbook.length,
   transitEstimate: {
     note: 'The workbook records dispatch dates only, so transit is estimated from its distances. Every transit figure is marked "est." and no CO₂e depends on one.',
     kmPerDay: TRANSIT.kmPerDay,
     portDwellDays: TRANSIT.portDwellDays,
   },
-  plannedBasis: `The workbook's last dispatch is ${LAST_DISPATCH}, so today is ${APP_TODAY} and the forward book is the `
-    + `FY23-24 July–September quarter rolled forward ${ROLL_DAYS} days. Product, weight, gateway, container and every `
-    + `distance are unchanged from the real shipment — only the dates move, and each planned row carries the cell range it came from.`,
+  syntheticBasis: `The workbook records ${ASSUMPTION_FY_LIST(src)} and stops on ${LAST_WORKBOOK_DISPATCH}; every row in it `
+    + `has already shipped. The only rows in this dataset that are not from the workbook are the ${plannedSeeds.length} `
+    + `to-be-planned shipments — nothing between ${LAST_WORKBOOK_DISPATCH} and ${APP_TODAY} has been filled in, so every `
+    + `reported figure, every chart of history and the whole ESG report are the workbook's own numbers and nothing else.`,
+  plannedBasis: `The forward book is the ${PLAN_SOURCE_YEAR} export shipments dispatched between August and December, `
+    + `rolled forward ${ROLL_YEARS} years into the Aug–Dec ${APP_TODAY.slice(0, 4)} planning window — `
+    + `${plannedSeeds.length} shipments, capped at ${PLAN_MAX} so the queue stays reviewable. It exists because the `
+    + `workbook has no forward-dated rows and a routing decision can only be made on a shipment that has not moved yet. `
+    + `Product, weight, gateway, container, every distance and every emission factor are the recorded shipment's; only `
+    + `the dates move, and each row carries the cell range it came from.`,
   notInWorkbook: [
     'Customer and consignee — the workbook records destination ports, not who buys.',
     'Vendor, processor, carrier and forwarder — no partner is named anywhere in it.',
@@ -962,12 +1293,16 @@ const evidence = {
     boundary: 'First-mile collection from the growing regions, factory to inland depot, depot to gateway port, and the international sailing or flight.',
   },
   dataSourceNotes: src.source.dataSourceNotes,
+  /** Every figure on this page is workbook-only — stated so it can be relied on. */
+  workbookOnly: true,
   assumptions: [
     ASSUMPTIONS.transitEstimate.note,
+    ASSUMPTIONS.syntheticBasis,
     ASSUMPTIONS.plannedBasis,
     'Route options are only offered where the workbook records every leg they use, and each shows how many shipments already moved that way.',
     "Region and market are derived from the workbook's destination port names; product form and Scoville rating are parsed from its item descriptions.",
-    `Route options use the FY23-24 inland network. Earlier tabs record the same run as both 21 km and 645 km to "Hyderabad", so they are read for history but not used to price alternatives.`,
+    'A shipment shows at most one card per lever — shorter first mile, shorter sailing, different gateway, sea instead of air, shared truck — and only where that lever beats the route as booked. The optimised route is the lowest-CO₂e routing of those; where nothing beats the booked route, the booked route is the optimised one and the count of alternatives priced is shown instead.',
+    `Inland alternatives are drawn from all three tabs. The tabs disagree about the factory-to-depot run — 645 km on 69 FY21-22 rows against 21 km on 62 others and 51 km to "ICD Hyderabad" on FY23-24 — and the shorter-first-mile option names both distances rather than silently picking one.`,
   ],
 };
 
@@ -978,7 +1313,9 @@ const filterOptions = {
   modes: ['Road', 'Rail', 'Ocean', 'Air'],
   destPorts: uniq(exportRows.map((s) => s.destPort)).sort(),
   gateways: uniq(exportRows.map((s) => s.gateway).filter(Boolean)).sort(),
-  reportingYears: uniq(enriched.map((s) => s.reportingYear)),
+  reportingYears: uniq(enriched.map((s) => s.reportingYear)).sort(),
+  /** Recorded years only — what the ESG report is allowed to be scoped to. */
+  workbookReportingYears: src.years.map((y) => y.reportingYear),
 };
 
 const copilotSuggestions = [
@@ -1036,12 +1373,16 @@ write('copilot-suggestions.json', copilotSuggestions);
 const plannedRecs = recommendations.filter((r) => r.shipmentId?.startsWith('PLN'));
 console.log(`\nBuilt public/mock-data from ${src.source.workbook}`);
 console.log(`  shipments        ${enriched.length}  (${delivered.length} delivered · ${planned.length} to be planned)`);
+console.log(`  provenance       ${fromWorkbook.length} from the workbook · ${syntheticRows.length} synthetic `
+  + `(the forward book only — ${PLAN_REPORTING_YEAR} ← ${PLAN_SOURCE_YEAR} Aug–Dec)`);
+console.log(`  timeline         ${ASSUMPTIONS.timelineFrom} → ${ASSUMPTIONS.timelineTo}   `
+  + `workbook ends ${LAST_WORKBOOK_DISPATCH} · today ${APP_TODAY}`);
 console.log(`  export           ${exportRows.length}  ·  first-mile collection ${enriched.length - exportRows.length}`);
 console.log(`  lanes            ${lanes.length}`);
 console.log(`  decisions        ${recommendations.length}  worth ${r3(sum(recommendations, (r) => r.estCo2eSavingTonnes))} t CO₂e`);
 console.log(`  · to be planned  ${plannedRecs.length}  worth ${r3(sum(plannedRecs, (r) => r.estCo2eSavingTonnes))} t CO₂e`);
 console.log(`  exceptions       ${exceptions.length}`);
-console.log(`  as of            ${APP_TODAY}  (last workbook dispatch ${LAST_DISPATCH})`);
+console.log(`  as of            ${APP_TODAY}`);
 for (const y of evidenceYears) {
   console.log(`  ${y.reportingYear}  all legs ${String(r3(y.allLegsCo2eTonnes)).padStart(8)} t   `
     + `workbook total ${String(r3(y.reportedCo2eTonnes)).padStart(8)} t   ${y.reconciliationNote ? 'differs (documented)' : 'exact match'}`);
@@ -1049,3 +1390,13 @@ for (const y of evidenceYears) {
 const byKind = new Map();
 for (const r of recommendations) byKind.set(r.type, (byKind.get(r.type) ?? 0) + r.estCo2eSavingTonnes);
 console.log('  by option:', [...byKind.entries()].map(([k, v]) => `${k} ${r3(v)} t`).join(' · '));
+
+// Coverage — how much of the register the optimiser can actually speak to.
+const optimisable = exportRows.filter((s) => s.avoidableTonnes > 1e-9);
+const alreadyBest = exportRows.filter((s) => s.avoidableTonnes <= 1e-9 && s.alternativesConsidered > 0);
+const noAlternative = exportRows.filter((s) => s.alternativesConsidered === 0);
+const cards = exportRows.map((s) => optionsById.get(s.shipmentId).length);
+console.log(`  coverage         ${optimisable.length} export shipments have a cheaper route · `
+  + `${alreadyBest.length} already on the optimised one · ${noAlternative.length} with nothing else recorded`);
+console.log(`  option cards     ${Math.min(...cards)}–${Math.max(...cards)} per export shipment `
+  + `(avg ${(sum(cards, (c) => c) / cards.length).toFixed(2)})`);

@@ -99,3 +99,48 @@ body,
 .leaflet-container .leaflet-control-zoom a {
   border-radius: 6px;
 }
+
+/* ── Print ──────────────────────────────────────────────────────────────────
+   "Print / save PDF" on the Footprint & Evidence page. The chrome around the
+   report (sidebar, top bar, filter and copilot docks) is navigation, not
+   content, so it is dropped; cards are flattened to plain bordered blocks and
+   allowed to break across pages rather than being clipped at the fold. */
+@media print {
+  @page {
+    margin: 14mm;
+  }
+  body {
+    background: #fff;
+  }
+  /* Navigation chrome and floating actions never belong in a printed report. */
+  header.MuiAppBar-root,
+  .MuiDrawer-root,
+  .tw-copilot-dock,
+  .tw-no-print {
+    display: none !important;
+  }
+  /* The app shell offsets content for the fixed sidebar and bar — undo both. */
+  .tw-app-main {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+  }
+  .MuiCard-root {
+    box-shadow: none !important;
+    border: 1px solid #d7dde5 !important;
+    break-inside: avoid;
+  }
+  .MuiTableContainer-root {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  /* Keep a chart and its heading on one page where it will fit. */
+  .recharts-wrapper,
+  .MuiTable-root {
+    break-inside: avoid;
+  }
+  a[href]::after {
+    content: '';
+  }
+}

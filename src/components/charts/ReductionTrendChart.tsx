@@ -4,6 +4,7 @@ import {
   CartesianGrid,
   ComposedChart,
   Line,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -30,9 +31,14 @@ const LABEL: Record<string, string> = {
 export function ReductionTrendChart({ data, height = 280 }: { data: MonthlyPoint[]; height?: number }) {
   const theme = useTheme();
   const rows = data.map((d) => ({ ...d, periodLabel: formatPeriod(d.period) }));
+  // First synthetic month, so the switch from recorded to mirrored data can be
+  // marked on the timeline rather than left for the reader to guess.
+  const firstSynthetic = rows.find((d) => d.dataOrigin === 'synthetic')?.periodLabel;
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <ComposedChart data={rows} margin={{ top: 8, right: 12, bottom: 0, left: -8 }}>
+      {/* Right margin leaves room for the brush's end-date label, which Recharts
+          draws outside the plot area and would otherwise be clipped. */}
+      <ComposedChart data={rows} margin={{ top: 8, right: 30, bottom: 0, left: 4 }}>
         <defs>
           <linearGradient id="twActual" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={theme.palette.primary.main} stopOpacity={0.35} />
@@ -59,6 +65,14 @@ export function ReductionTrendChart({ data, height = 280 }: { data: MonthlyPoint
           labelFormatter={(l) => `Month: ${l}`}
           contentStyle={{ borderRadius: 10, fontSize: 12 }}
         />
+        {firstSynthetic && (
+          <ReferenceLine
+            x={firstSynthetic}
+            stroke={theme.palette.warning.main}
+            strokeDasharray="4 4"
+            label={{ value: 'workbook ends', position: 'insideTopRight', fontSize: 10, fill: theme.palette.warning.main }}
+          />
+        )}
         <Area type="monotone" dataKey="co2eTonnes" stroke={theme.palette.primary.main} strokeWidth={2.5} fill="url(#twActual)" />
         <Line
           type="monotone"
@@ -71,7 +85,7 @@ export function ReductionTrendChart({ data, height = 280 }: { data: MonthlyPoint
         {rows.length > 12 && (
           <Brush
             dataKey="periodLabel"
-            height={22}
+            height={24}
             travellerWidth={9}
             stroke={theme.palette.primary.main}
             fill={theme.palette.mode === 'dark' ? '#1e293b' : '#f3f4f6'}

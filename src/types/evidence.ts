@@ -1,3 +1,5 @@
+import type { DataOrigin } from './common';
+
 /**
  * The bridge from the total the workbook prints for a tab to the total the app
  * reports. Every line is a number read out of the workbook, so the two figures
@@ -29,10 +31,43 @@ export interface ReportingYearFootprint {
   weightTonnes: number;
   shipments: number;
   intensity: number;
+  /** CO₂e this year that a workbook-evidenced option would have avoided. */
+  avoidableTonnes: number;
+  airShipments: number;
+  /**
+   * A split of the year by the mode of the leg that produced the CO₂e. The four
+   * exhaust `allLegsCo2eTonnes` exactly, which is only true because each counts
+   * legs rather than shipments — a flown shipment's truck run to the airport
+   * belongs in `roadCo2eTonnes`, not here.
+   */
+  roadCo2eTonnes: number;
+  railCo2eTonnes: number;
+  oceanCo2eTonnes: number;
+  airCo2eTonnes: number;
+  /** Whole footprint of the shipments that flew, road leg included. */
+  flownShipmentCo2eTonnes: number;
+  exportShipments: number;
+  collectionShipments: number;
+  /** Per-slice splits, so one year can be reported on its own. */
+  byCategory: YearShare[];
+  byDestPort: YearShare[];
+  byGateway: YearShare[];
+  byMode: YearShare[];
+}
+
+/** One slice of a reporting year's CO₂e. */
+export interface YearShare {
+  label: string;
+  co2eTonnes: number;
+  weightTonnes: number;
+  shipments: number;
+  pct: number;
 }
 
 export interface MonthlyPoint {
   period: string;
+  /** Recorded month, or one of the mirrored months bridging to today. */
+  dataOrigin: DataOrigin;
   co2eTonnes: number;
   weightTonnes: number;
   intensity: number;
@@ -69,4 +104,6 @@ export interface EsgEvidence {
   /** Verbatim data-source notes the workbook prints under its tables. */
   dataSourceNotes: string[];
   assumptions: string[];
+  /** True when every figure in this pack comes from the workbook and nothing else. */
+  workbookOnly: boolean;
 }

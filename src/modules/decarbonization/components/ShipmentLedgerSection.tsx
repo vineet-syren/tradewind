@@ -13,6 +13,7 @@ import { useAppSelector } from '@/app/store/hooks';
 import type { Shipment } from '@/types';
 import { APP_TODAY, STATUS_LABEL, addDaysISO } from '@/constants/app';
 import { formatTonnes, formatDistance, formatNumber, formatWeightTonnes, formatIntensity, formatDate } from '@/utils/format';
+import { insightsForRegister } from '@/utils/insights';
 
 const STATUSES = ['All', 'Delivered', 'Planned'] as const;
 const STREAMS = [
@@ -215,8 +216,11 @@ export function ShipmentLedgerSection({
   const handleRow = (s: Shipment) => (onRowSelect ? onRowSelect(s) : setSelected(s.shipmentId));
 
   return (
-    <Box>
-      <Card sx={{ mb: 2.5 }}>
+    // In the split layout the parent hands down a definite height that tracks
+    // the panel opposite, so the register fills it and scrolls inside instead of
+    // ending short and leaving a gap beside a taller right-hand panel.
+    <Box sx={compact ? { height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 } : undefined}>
+      <Card sx={{ mb: 2.5, flexShrink: 0 }}>
         <CardContent sx={{ py: 2 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap gap={2}>
             <Box>
@@ -255,8 +259,12 @@ export function ShipmentLedgerSection({
       </Card>
 
       <ChartContainer
+        fill={compact}
         title="Shipment register"
-        subtitle="Every movement the workbook records, newest first · click a row to trace its route and see the full breakdown"
+        insights={rows.length ? insightsForRegister(rows) : undefined}
+        isEmpty={status !== 'loading' && Boolean(result) && rows.length === 0}
+        emptyMessage="No movements match this period and filter set. Widen the date range or clear a filter."
+        subtitle="Every movement on the timeline, newest first · click a row to trace its route and see its optimised route"
         icon={<ReceiptLongRounded sx={{ fontSize: 18 }} />}
         action={
           <Stack direction="row" spacing={1}>
@@ -286,10 +294,6 @@ export function ShipmentLedgerSection({
       >
         {status === 'loading' || !result ? (
           <TableSkeleton rows={10} />
-        ) : rows.length === 0 ? (
-          <Typography variant="body2" color="text.secondary" sx={{ py: 6, textAlign: 'center' }}>
-            No shipments match this period and filter set. Widen the date range or clear a filter.
-          </Typography>
         ) : (
           <DataTable
             columns={columns}
@@ -298,7 +302,7 @@ export function ShipmentLedgerSection({
             onRowClick={handleRow}
             selectedRowKey={selectedId ?? selected}
             initialSortKey="date"
-            maxHeightCss={compact ? 'calc(100vh - 210px)' : undefined}
+            fill={compact}
             maxHeight={compact ? undefined : 620}
           />
         )}

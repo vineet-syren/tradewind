@@ -1,29 +1,13 @@
 import { useState } from 'react';
-import { Avatar, Box, Button, Menu, MenuItem, Stack, Typography } from '@mui/material';
+import { Box, Button, Menu, MenuItem, Stack, Typography } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded';
 import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded';
 import { PERSONAS, getPersona } from '@/constants/personas';
+import { PersonaAvatar, PERSONA_COLOR } from './PersonaAvatar';
 import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
 import { setPersona } from '@/app/store/personaSlice';
 import type { PersonaId } from '@/types';
-
-/** One accent per persona so the active lens is recognizable at a glance. */
-const PERSONA_COLOR: Record<string, string> = {
-  cso: '#4f46e5',
-  logistics: '#3b82f6',
-  analyst: '#10b981',
-  procurement: '#f59e0b',
-};
-
-const initials = (name: string) =>
-  name
-    .split(/[\s/·]+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0])
-    .join('')
-    .toUpperCase();
 
 export function PersonaSwitcher() {
   const dispatch = useAppDispatch();
@@ -53,9 +37,7 @@ export function PersonaSwitcher() {
         }}
       >
         <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
-          <Avatar sx={{ width: 26, height: 26, fontSize: 11, fontWeight: 800, bgcolor: alpha(color, 0.14), color }}>
-            {initials(p.name)}
-          </Avatar>
+          <PersonaAvatar personaId={p.id} size={26} />
           <Box sx={{ minWidth: 0, textAlign: 'left', display: { xs: 'none', sm: 'block' } }}>
             <Typography variant="body2" noWrap sx={{ fontWeight: 700, lineHeight: 1.15 }}>
               {p.name}
@@ -97,9 +79,7 @@ export function PersonaSwitcher() {
                 '&.Mui-selected': { bgcolor: alpha(c, 0.08), '&:hover': { bgcolor: alpha(c, 0.12) } },
               }}
             >
-              <Avatar sx={{ width: 34, height: 34, fontSize: 12.5, fontWeight: 800, bgcolor: alpha(c, 0.14), color: c, mt: 0.25 }}>
-                {initials(persona.name)}
-              </Avatar>
+              <PersonaAvatar personaId={persona.id} size={34} />
               <Box sx={{ minWidth: 0, flexGrow: 1 }}>
                 <Typography variant="body2" sx={{ fontWeight: 700 }}>
                   {persona.name}

@@ -12,6 +12,7 @@ import type {
   ReportingYearPoint,
   Shipment,
 } from '@/types';
+import { APP_TODAY } from '@/constants/app';
 
 const round = (n: number, dp = 1) => {
   const f = 10 ** dp;
@@ -21,8 +22,25 @@ const total = (rows: Shipment[], f: (s: Shipment) => number) => rows.reduce((a, 
 
 const MODES: ModeLabel[] = ['Ocean', 'Rail', 'Road', 'Air'];
 
-/** g CO₂e per tonne-km — the GLEC intensity unit. */
-const gPerTonneKm = (co2eT: number, tonneKm: number) => round((co2eT * 1e6) / Math.max(tonneKm, 0.001), 1);
+/**
+ * Has a reporting year run its course? "FY26-27" is the Jul 2026 → Jun 2027
+ * window, so it is closed once 30 Jun 2027 is in the past.
+ */
+function isYearClosed(reportingYear: string): boolean {
+  const m = /^FY(\d{2})-(\d{2})$/.exec(reportingYear.trim());
+  if (!m) return true; // an unrecognised label is not something to caveat
+  return `20${m[2]}-06-30` <= APP_TODAY;
+}
+
+/**
+ * g CO₂e per tonne-km — the GLEC intensity unit.
+ *
+ * Kept to three decimals, not one. `formatIntensity` renders values under 10
+ * with two decimals, so rounding here to one produced falsely precise output:
+ * a true 9.25 became 9.3 and then displayed as "9.30". Rounding is the
+ * formatter's job; the mapper's job is not to lose the figure first.
+ */
+const gPerTonneKm = (co2eT: number, tonneKm: number) => round((co2eT * 1e6) / Math.max(tonneKm, 0.001), 3);
 
 function shares(rows: Shipment[], key: (s: Shipment) => string, grand: number): NamedShare[] {
   const agg = new Map<string, number>();
@@ -59,14 +77,19 @@ export function buildFootprint(shipments: Shipment[], lanes: Lane[]): Footprint 
     };
   });
 
-  // By reporting year — the workbook's own Jul→Jun windows, in workbook order.
-  const yearAgg = new Map<string, { co2e: number; weight: number; tonneKm: number; n: number }>();
+  // By reporting year — the workbook's own Jul→Jun windows, in year order.
+  const yearAgg = new Map<
+    string,
+    { co2e: number; weight: number; tonneKm: number; n: number; planned: number; synthetic: number }
+  >();
   for (const s of shipments) {
-    const g = yearAgg.get(s.reportingYear) ?? { co2e: 0, weight: 0, tonneKm: 0, n: 0 };
+    const g = yearAgg.get(s.reportingYear) ?? { co2e: 0, weight: 0, tonneKm: 0, n: 0, planned: 0, synthetic: 0 };
     g.co2e += s.co2eTonnes;
     g.weight += s.weightTonnes;
     g.tonneKm += s.weightTonnes * s.totalDistanceKm;
     g.n += 1;
+    if (s.status === 'Planned') g.planned += 1;
+    if (s.dataOrigin === 'synthetic') g.synthetic += 1;
     yearAgg.set(s.reportingYear, g);
   }
   const byReportingYear: ReportingYearPoint[] = [...yearAgg.entries()]
@@ -76,12 +99,22 @@ export function buildFootprint(shipments: Shipment[], lanes: Lane[]): Footprint 
       weightTonnes: round(g.weight, 1),
       intensity: gPerTonneKm(g.co2e, g.tonneKm),
       shipments: g.n,
+      dataOrigin: (g.synthetic > 0 ? 'synthetic' : 'workbook') as ReportingYearPoint['dataOrigin'],
+      plannedShipments: g.planned,
+      isPartial: !isYearClosed(reportingYear),
     }))
     .sort((a, b) => a.reportingYear.localeCompare(b.reportingYear));
 
-  // "Latest year" means the last complete reporting year in scope, so the
-  // headline number is comparable rather than a part-year sum.
-  const complete = byReportingYear.filter((y) => !y.reportingYear.includes('planned'));
+  // "Latest year" means the last *complete* reporting year in scope, so the
+  // headline is comparable rather than a part-year sum.
+  //
+  // Two things make a year incomplete, and both have to be tested. It can still
+  // hold undispatched shipments, or — the case that is easy to miss — the
+  // calendar simply has not reached its June year-end yet, which is true of the
+  // year in progress even when the scope excludes the forward book entirely. A
+  // part-year totalling a fortnight of freight would otherwise be charted and
+  // compared as though it were a full twelve months.
+  const complete = byReportingYear.filter((y) => y.plannedShipments === 0 && !y.isPartial);
   const latest = complete.at(-1);
   const previous = complete.at(-2);
 

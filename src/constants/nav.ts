@@ -20,6 +20,10 @@ export interface NavGroupDef {
  * - Logistics lead: the operational tower + route/hotspot visibility.
  * - Analyst: the analytical slices and the report.
  *
+ * ESG Reporting is the exception and is open to all three: it is the one page
+ * whose figures get quoted outside the business, so every persona reads the
+ * same one rather than a role-specific version of it.
+ *
  * "Carrier & Vendor Performance" is deliberately absent: the source workbook
  * names no vendor, processor or carrier, so there is nothing real to rank.
  */
@@ -36,7 +40,10 @@ export const NAV_GROUPS: NavGroupDef[] = [
   },
   {
     heading: 'REPORT',
-    items: [{ label: 'ESG Reporting', to: '/evidence', iconKey: 'evidence', personas: ['cso', 'analyst'] }],
+    // Open to every persona. The reported footprint is one company figure that
+    // the logistics lead has to plan against as much as the CSO has to sign, and
+    // the year selector and the export are the same for all three.
+    items: [{ label: 'ESG Reporting', to: '/evidence', iconKey: 'evidence' }],
   },
 ];
 

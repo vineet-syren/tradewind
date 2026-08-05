@@ -71,8 +71,10 @@ export function AppShell() {
         </Box>
       </Drawer>
 
-      <Box component="main" sx={{ flexGrow: 1, minWidth: 0 }}>
-        <Toolbar />
+      {/* `tw-app-main` is the hook the print stylesheet uses to strip the shell's
+          offsets when a page is sent to the printer. */}
+      <Box component="main" className="tw-app-main" sx={{ flexGrow: 1, minWidth: 0 }}>
+        <Toolbar className="tw-no-print" />
         <Box sx={{ p: { xs: 2, md: 3.5 }, maxWidth: 1520, mx: 'auto' }}>
           <Suspense fallback={<RouteFallback />}>
             <Outlet />

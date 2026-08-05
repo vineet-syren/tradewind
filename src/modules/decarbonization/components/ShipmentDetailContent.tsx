@@ -20,7 +20,6 @@ export function ShipmentDetailContent({ shipmentId }: { shipmentId: string }) {
   if (status === 'loading') return <TableSkeleton rows={6} />;
   if (!s) return <Typography color="text.secondary">Shipment not found.</Typography>;
 
-  const best = s.options.find((o) => !o.isCurrent);
   const facts: [string, string][] = [
     ['Product', s.productName],
     ['Category', `${s.category}${s.shu ? ` · ${s.shu.toLocaleString('en-US')} SHU` : ''}`],
@@ -68,11 +67,16 @@ export function ShipmentDetailContent({ shipmentId }: { shipmentId: string }) {
             {formatTonnes(s.co2eTonnes)} ({formatIntensity(s.co2ePerTonneKm)})
           </Typography>
         </Stack>
-        {s.avoidableTonnes > 0.0005 && (
+        {s.avoidableTonnes > 0.0005 ? (
           <Typography variant="caption" color="success.main">
-            {formatTonnes(s.avoidableTonnes)} avoidable via “{s.bestOptionLabel}” — a route the workbook already runs
+            {formatTonnes(s.avoidableTonnes)} saved on the optimised route — “{s.bestOptionLabel}”, which the workbook already runs
           </Typography>
-        )}
+        ) : s.alternativesConsidered > 0 ? (
+          <Typography variant="caption" color="text.secondary">
+            Already the optimised route — {s.alternativesConsidered} other routing
+            {s.alternativesConsidered === 1 ? '' : 's'} the workbook records for it cost more
+          </Typography>
+        ) : null}
         <SourceRef refs={[s.sourceRef]} />
       </Box>
 
@@ -86,11 +90,11 @@ export function ShipmentDetailContent({ shipmentId }: { shipmentId: string }) {
       {s.options.length > 1 && (
         <Box>
           <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>
-            Route options
+            Route optimisation
           </Typography>
           <Stack spacing={1.5}>
             {s.options.map((o) => (
-              <ScenarioCard key={o.id} option={o} recommended={!o.isCurrent && o.id === best?.id} compact />
+              <ScenarioCard key={o.id} option={o} compact />
             ))}
           </Stack>
         </Box>

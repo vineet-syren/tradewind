@@ -1,11 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Box, Card, CardContent, MenuItem, Stack, TextField, Typography } from '@mui/material';
 import AccountTreeRounded from '@mui/icons-material/AccountTreeRounded';
-import GridOnRounded from '@mui/icons-material/GridOnRounded';
 import LayersRounded from '@mui/icons-material/LayersRounded';
 import LocalFireDepartmentRounded from '@mui/icons-material/LocalFireDepartmentRounded';
 import ShowChartRounded from '@mui/icons-material/ShowChartRounded';
-import TravelExploreRounded from '@mui/icons-material/TravelExploreRounded';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ScopeNote } from '@/components/layout/ScopeNote';
 import { FilterPanel } from '@/components/filters/FilterPanel';
@@ -14,31 +12,27 @@ import { EquivalentsStrip } from '@/components/cards/EquivalentsStrip';
 import { ChartContainer } from '@/components/charts/ChartContainer';
 import { BarList } from '@/components/charts/BarList';
 import { IntensityRanking } from '@/components/charts/IntensityRanking';
-import { TreemapChart } from '@/components/charts/TreemapChart';
 import { YearOverYearChart } from '@/components/charts/YearOverYearChart';
 import { MoMTrendChart } from '@/components/charts/MoMTrendChart';
 import { ModeTrendArea } from '@/components/charts/ModeTrendArea';
 import { ModeSplitDonut } from '@/components/charts/ModeSplitDonut';
 import { SankeyChart } from '@/components/charts/SankeyChart';
-import { HeatmapChart } from '@/components/charts/HeatmapChart';
 import { ChartSkeleton } from '@/components/loaders/Skeletons';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { useDataSource } from '@/hooks/useDataSource';
 import { useAsync } from '@/hooks/useAsync';
 import { useAppSelector } from '@/app/store/hooks';
-import type { HotspotDimension, HotspotRow, MonthModeRow } from '@/types';
+import type { HotspotDimension, HotspotRow } from '@/types';
 import {
   insightsForFlows,
   insightsForHotspots,
   insightsForModeSplit,
   insightsForMonthlyByMode,
-  insightsForRegionModes,
+  insightsForMonthlyTimeline,
   insightsForReportingYears,
   insightsForSeasonality,
 } from '@/utils/insights';
 import { formatTonnes } from '@/utils/format';
-
-const MODES = ['Ocean', 'Rail', 'Road', 'Air'] as const;
 
 const DIMENSIONS: { key: HotspotDimension; label: string; noun: string }[] = [
   { key: 'byCategory', label: 'Product category', noun: 'product category' },
@@ -56,7 +50,6 @@ const toBars = (rows: HotspotRow[]) =>
     value: r.co2eTonnes,
     sub: r.shipments ? `${r.shipments} movement${r.shipments === 1 ? '' : 's'}` : undefined,
   }));
-const toTreemap = (rows: HotspotRow[]) => rows.map((r) => ({ name: r.label, size: r.co2eTonnes }));
 const toIntensity = (rows: HotspotRow[]) =>
   [...rows]
     .sort((a, b) => b.co2ePerTonneKm - a.co2ePerTonneKm)
@@ -100,7 +93,7 @@ export default function HotspotsPage() {
       },
       {
         id: 'avoidable',
-        label: 'Avoidable on proven routes',
+        label: 'Avoidable on optimised routes',
         value: footprint.avoidableTonnes,
         unit: 'tonnes' as const,
         intent: 'opportunity' as const,
@@ -165,10 +158,15 @@ export default function HotspotsPage() {
               subtitle="Bars are total CO₂e, the line is intensity — click a year to drill into its months"
               icon={<ShowChartRounded sx={{ fontSize: 18 }} />}
               insights={footprint ? insightsForReportingYears(footprint.byReportingYear) : undefined}
+              isEmpty={Boolean(footprint && footprint.byReportingYear.length === 0)}
+              emptyMessage="No reporting year falls inside the current filters. Widen the date range and the yearly trend comes back."
             >
               {footprint ? (
+                // Every year in scope, including the one still being planned —
+                // the chart marks those rather than dropping them, which is what
+                // used to leave this card blank under a forward-book filter.
                 <YearOverYearChart
-                  data={footprint.byReportingYear.filter((y) => !y.reportingYear.includes('planned'))}
+                  data={footprint.byReportingYear}
                   onYearClick={(y) => setYearFocus((cur) => (cur === y ? null : y))}
                   height={280}
                 />
@@ -182,19 +180,28 @@ export default function HotspotsPage() {
               subtitle={
                 yearFocus
                   ? 'Click the same year bar again to show every month'
-                  : 'Every month the workbook covers · drag the brush to zoom'
+                  : 'Every month on the timeline · drag the brush below to zoom into a stretch'
               }
               icon={<ShowChartRounded sx={{ fontSize: 18 }} />}
+              insights={evidence ? insightsForMonthlyTimeline(monthlyRows) : undefined}
+              isEmpty={Boolean(evidence && monthlyRows.length === 0)}
+              emptyMessage="No months fall inside the current selection."
             >
               {evidence ? (
-                <MoMTrendChart data={monthlyRows.map((m) => ({ label: m.period, value: m.co2eTonnes }))} height={280} />
+                <MoMTrendChart
+                  data={monthlyRows.map((m) => ({ label: m.period, value: m.co2eTonnes, dataOrigin: m.dataOrigin }))}
+                  height={280}
+                />
               ) : (
                 <ChartSkeleton height={280} />
               )}
             </ChartContainer>
           </Box>
 
-          {/* Self-service ranking — one dimension picker, bar list + treemap */}
+          {/* Self-service ranking — one dimension picker over the whole width.
+              The treemap that used to sit beside this bar list showed the same
+              numbers twice; the treemap lives on Product & Destination Lanes,
+              which is the page built around composition. */}
           <ChartContainer
             title={`CO₂e by ${dim.noun}`}
             subtitle="Ranked highest first · switch the dimension to re-slice the same emissions"
@@ -207,7 +214,7 @@ export default function HotspotsPage() {
                 label="Slice by"
                 value={dimension}
                 onChange={(e) => setDimension(e.target.value as HotspotDimension)}
-                sx={{ width: 190 }}
+                sx={{ width: 220 }}
               >
                 {DIMENSIONS.map((d) => (
                   <MenuItem key={d.key} value={d.key}>
@@ -217,10 +224,7 @@ export default function HotspotsPage() {
               </TextField>
             }
           >
-            <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' } }}>
-              <BarList items={toBars(rows)} valueFormatter={formatTonnes} />
-              <TreemapChart data={toTreemap(rows)} valueFormatter={formatTonnes} height={300} />
-            </Box>
+            <BarList items={toBars(rows)} valueFormatter={formatTonnes} />
           </ChartContainer>
 
           <Box sx={{ display: 'grid', gap: 3, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' } }}>
@@ -241,37 +245,20 @@ export default function HotspotsPage() {
             </ChartContainer>
           </Box>
 
+          {/* Seasonality had its own heat map here reading the same
+              `monthlyByMode` rows as this area chart, so the two said the same
+              thing twice; the seasonal reading is folded into these insights.
+              "CO₂e by destination region" is covered in full by Region × mode on
+              Product & Destination Lanes, which shows the mix as well as the total. */}
           <ChartContainer
             title="Monthly CO₂e by mode"
-            subtitle="Where the seasonal peaks fall, and which mode drives them"
+            subtitle="Where the seasonal peaks fall, and which mode drives them · drag the brush to zoom"
             icon={<ShowChartRounded sx={{ fontSize: 18 }} />}
-            insights={insightsForMonthlyByMode(hotspots.monthlyByMode)}
+            insights={[...insightsForMonthlyByMode(hotspots.monthlyByMode), ...insightsForSeasonality(hotspots.monthlyByMode)]}
+            isEmpty={hotspots.monthlyByMode.length === 0}
           >
             <ModeTrendArea data={hotspots.monthlyByMode} />
           </ChartContainer>
-
-          <Box sx={{ display: 'grid', gap: 3, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' } }}>
-            <ChartContainer
-              title="Seasonality"
-              subtitle="Mode × month — darker is heavier"
-              icon={<GridOnRounded sx={{ fontSize: 18 }} />}
-              insights={insightsForSeasonality(hotspots.monthlyByMode)}
-            >
-              <SeasonalityHeatmap months={hotspots.monthlyByMode} />
-            </ChartContainer>
-
-            <ChartContainer
-              title="CO₂e by destination region"
-              subtitle="Where the footprint lands"
-              icon={<TravelExploreRounded sx={{ fontSize: 18 }} />}
-              insights={insightsForRegionModes(hotspots.regionModeMatrix)}
-            >
-              <BarList
-                items={hotspots.regionModeMatrix.map((r) => ({ label: r.region, value: r.total }))}
-                valueFormatter={formatTonnes}
-              />
-            </ChartContainer>
-          </Box>
 
           <ChartContainer
             title="Gateway → mode → region"
@@ -316,15 +303,3 @@ export default function HotspotsPage() {
   );
 }
 
-/** Mode × month grid — HeatmapChart wants rows/cols/values, the domain has months. */
-function SeasonalityHeatmap({ months }: { months: MonthModeRow[] }) {
-  const window = months.slice(-12);
-  return (
-    <HeatmapChart
-      rows={[...MODES]}
-      cols={window.map((m) => m.period)}
-      values={MODES.map((mode) => window.map((m) => m[mode]))}
-      fitHeight={220}
-    />
-  );
-}

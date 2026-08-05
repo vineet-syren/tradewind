@@ -62,11 +62,15 @@ export interface CarbonDataSource {
 
   /**
    * The decision queue: shipments with a better workbook-evidenced option.
-   * `plannedOnly` narrows it to freight that has not shipped yet — the
-   * decisions a logistics lead can still act on.
+   *
+   * `plannedOnly` narrows it to freight that has not shipped yet — the decisions
+   * a logistics lead can still act on. `shippedOnly` is the mirror image, and
+   * overrides the caller's date window rather than merely defaulting it: figures
+   * that must be quotable as recorded history cannot be allowed to absorb the
+   * forward book just because the user scoped the page forward.
    */
   getRecommendations(
-    params?: ScopeParams & { laneId?: string; plannedOnly?: boolean },
+    params?: ScopeParams & { laneId?: string; plannedOnly?: boolean; shippedOnly?: boolean },
   ): Promise<Recommendation[]>;
   getFocusKpis(params: { persona?: PersonaId; filters?: ShipmentFilters }): Promise<KpiMetric[]>;
 

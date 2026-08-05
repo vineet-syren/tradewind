@@ -3,14 +3,16 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Tradewind — Downstream Transportation Carbon Decisioning (frontend-only, mock-first)",
+  "description": "Tradewind \u2014 Downstream Transportation Carbon Decisioning (frontend-only, mock-first)",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "lint": "eslint .",
-    "mock:gen": "node scripts/generate-mock-data.mjs"
+    "mock:gen": "node scripts/generate-mock-data.mjs",
+    "mock:verify": "node scripts/verify-data.mjs",
+    "mock:build": "npm run mock:gen && npm run mock:verify"
   },
   "dependencies": {
     "@emotion/react": "^11.13.3",

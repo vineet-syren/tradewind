@@ -108,6 +108,7 @@ export function CopilotDock() {
     return (
       <Tooltip title="Ask Tradewind — your carbon assistant" placement="left">
         <Fab
+          className="tw-copilot-dock"
           color="primary"
           variant="extended"
           onClick={() => setOpen(true)}
@@ -126,6 +127,7 @@ export function CopilotDock() {
   return (
     <Paper
       elevation={12}
+      className="tw-copilot-dock"
       sx={{
         position: 'fixed',
         zIndex: (t) => t.zIndex.drawer - 1,

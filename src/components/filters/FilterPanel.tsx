@@ -66,7 +66,11 @@ export function FilterPanel({ showSearch = true }: { showSearch?: boolean }) {
             }}
           >
             <FilterAltRoundedIcon fontSize="small" sx={{ color: 'primary.main', flexShrink: 0 }} />
-            <DateRangeFilter value={{ dateFrom: filters.dateFrom, dateTo: filters.dateTo }} onChange={(patch) => dispatch(patchFilters(patch))} />
+            <DateRangeFilter
+              value={{ dateFrom: filters.dateFrom, dateTo: filters.dateTo }}
+              onChange={(patch) => dispatch(patchFilters(patch))}
+              reportingYears={opts.reportingYears}
+            />
             <MultiSelectFilter label="Region" options={opts.regions} value={filters.regions ?? []} onChange={(v) => dispatch(patchFilters({ regions: v }))} width={138} />
             <MultiSelectFilter label="Market" options={opts.markets} value={filters.markets ?? []} onChange={(v) => dispatch(patchFilters({ markets: v }))} width={150} />
             <MultiSelectFilter label="Category" options={opts.categories} value={filters.categories ?? []} onChange={(v) => dispatch(patchFilters({ categories: v }))} width={166} />

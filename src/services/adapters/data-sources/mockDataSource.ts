@@ -34,7 +34,7 @@ import type {
 } from '@/types';
 import { AGENT_CATALOG } from '@/constants/agents';
 import { getPersona } from '@/constants/personas';
-import { APP_TODAY } from '@/constants/app';
+import { APP_TODAY, addDaysISO } from '@/constants/app';
 import { queryShipments, scopeAndFilter } from '@/services/mappers/shipmentQuery';
 import { buildFootprint } from '@/services/mappers/footprint';
 import { buildHotspots, filterLanes } from '@/services/mappers/hotspots';
@@ -178,15 +178,23 @@ export class MockDataSource implements CarbonDataSource {
 
   // ── Decisions ──────────────────────────────────────────────────────────
   async getRecommendations(
-    params: ScopeParams & { laneId?: string; plannedOnly?: boolean } = {},
+    params: ScopeParams & { laneId?: string; plannedOnly?: boolean; shippedOnly?: boolean } = {},
   ): Promise<Recommendation[]> {
     await delay('normal');
     let recs = await this.loadRecommendations();
     if (params.laneId) return recs.filter((r) => r.laneId === params.laneId);
     // "Open" means the freight has not left yet — a decision you can still make.
-    if (params.plannedOnly) recs = recs.filter((r) => (r.shipmentDate ?? '') > APP_TODAY);
+    if (params.plannedOnly) recs = recs.filter((r) => (r.shipmentDate ?? '') >= APP_TODAY);
+    // "Shipped" is the mirror image: freight that has already moved, so the
+    // saving is what was missed rather than what is still available. Applied
+    // before the filter window, so it holds even when the user has scoped the
+    // page forward — some figures must never absorb the forward book whatever
+    // the filter says.
+    if (params.shippedOnly) recs = recs.filter((r) => (r.shipmentDate ?? '') < APP_TODAY);
     if (params.filters) {
-      const scoped = new Set((await this.scopedShipments({ ...params, filters: openWindow(params.filters, params.plannedOnly) })).map((s) => s.shipmentId));
+      const scoped = new Set(
+        (await this.scopedShipments({ ...params, filters: scopeWindow(params.filters, params) })).map((s) => s.shipmentId),
+      );
       recs = recs.filter((r) => !r.shipmentId || scoped.has(r.shipmentId));
     }
     return [...recs].sort((a, b) => b.priorityScore - a.priorityScore);
@@ -238,10 +246,18 @@ export class MockDataSource implements CarbonDataSource {
 }
 
 /**
- * The default date window stops at today, which would hide the very shipments a
- * planned-only decision query is about — so open the window forward for those.
+ * Reconcile the caller's date window with what the query is asking for.
+ *
+ * The default window stops at today, which would hide the very shipments a
+ * planned-only query is about — so that case opens the window forward. A
+ * shipped-only query is the opposite and must hold even against a user filter
+ * that reaches into the future, so it closes the window at today outright.
  */
-function openWindow(filters: ShipmentFilters, plannedOnly?: boolean): ShipmentFilters {
-  if (!plannedOnly || filters.dateFrom || filters.dateTo) return filters;
-  return { ...filters, dateFrom: APP_TODAY };
+function scopeWindow(
+  filters: ShipmentFilters,
+  { plannedOnly, shippedOnly }: { plannedOnly?: boolean; shippedOnly?: boolean },
+): ShipmentFilters {
+  if (shippedOnly) return { ...filters, dateFrom: undefined, dateTo: addDaysISO(APP_TODAY, -1) };
+  if (plannedOnly && !filters.dateFrom && !filters.dateTo) return { ...filters, dateFrom: APP_TODAY };
+  return filters;
 }

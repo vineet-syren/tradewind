@@ -76,7 +76,7 @@ export function buildFocusKpis(persona: PersonaId, ctx: FocusCtx): KpiMetric[] {
     },
     {
       id: 'avoidable',
-      label: 'Avoidable on proven routes',
+      label: 'Avoidable on optimised routes',
       value: f.avoidableTonnes,
       unit: 'tonnes',
       display: tonnes(f.avoidableTonnes),

@@ -1,4 +1,4 @@
-import type { DataConfidence, DestRegion, GeoCoord, Mode, ModeLabel, Stream } from './common';
+import type { DataConfidence, DataOrigin, DestRegion, GeoCoord, Mode, ModeLabel, Stream } from './common';
 import type { RouteOption } from './lane';
 import type { Recommendation } from './recommendation';
 
@@ -93,12 +93,22 @@ export interface Shipment {
   /** CO₂e this shipment could avoid on the best workbook-evidenced option. */
   avoidableTonnes: number;
   avoidablePct: number;
-  /** The option that achieves `avoidableTonnes`; null when none is evidenced. */
+  /** The optimised route that achieves `avoidableTonnes`; null when the booked route already is it. */
   bestOptionKind: string | null;
   bestOptionLabel: string | null;
+  /**
+   * Distinct routings the workbook evidences for this shipment that were priced,
+   * whether or not they beat the booked route. Separates "already the lowest of
+   * three" from "the workbook records no other way to move this".
+   */
+  alternativesConsidered: number;
   sourceRef: string;
-  /** Planned rows are rolled forward from a real shipment — this is its cell range. */
+  /** Synthetic rows mirror a real shipment — this is its cell range. */
   derivedFromRef: string | null;
+  /** Whether this row was read from the workbook or mirrored forward from one. */
+  dataOrigin: DataOrigin;
+  /** For synthetic rows, the recorded reporting year this one mirrors. */
+  mirrorsReportingYear?: string | null;
 }
 
 /** Full per-shipment record (lazy detail chunk). */

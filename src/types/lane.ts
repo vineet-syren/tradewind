@@ -35,6 +35,12 @@ export interface RouteOption {
   evidence: string;
   evidenceRefs: string[];
   isCurrent: boolean;
+  /**
+   * The optimised route — the lowest-CO₂e routing on the table. Exactly one
+   * option per shipment carries it, and it is the `current` one whenever
+   * nothing the workbook records beats what was booked.
+   */
+  isOptimised: boolean;
 }
 
 export interface LaneCoords {
@@ -67,8 +73,18 @@ export interface Lane {
   /** Shipments per reporting year the lane was active — the annualisation basis. */
   annualFrequency: number;
   plannedShipmentCount: number;
+  /** Split of `shipmentCount` by provenance, so a lane can disclose its mix. */
+  workbookShipmentCount: number;
+  syntheticShipmentCount: number;
   totalWeightTonnes: number;
   totalCo2eTonnes: number;
+  /** The lane's CO₂e split by the leg mode that produced it. */
+  roadCo2eTonnes: number;
+  railCo2eTonnes: number;
+  oceanCo2eTonnes: number;
+  airCo2eTonnes: number;
+  /** Every mode this lane has used, in travel order — not just the dominant one. */
+  modesUsed: ModeLabel[];
   /** Total ÷ reporting years the lane was active — the ceiling for annual claims. */
   annualCo2eTonnes: number;
   avgCo2ePerTonne: number;

@@ -31,6 +31,7 @@ export function DataTable<T>({
   maxHeight,
   maxHeightCss,
   selectedRowKey,
+  fill = false,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -42,6 +43,11 @@ export function DataTable<T>({
   /** CSS max-height (e.g. a `calc(...)` string) — wins over `maxHeight` when set. */
   maxHeightCss?: string;
   selectedRowKey?: string | null;
+  /**
+   * Take whatever height a flex-column parent has left and scroll inside it,
+   * rather than sizing to the rows. Wins over both max-height props.
+   */
+  fill?: boolean;
 }) {
   const [sortKey, setSortKey] = useState<string | undefined>(initialSortKey);
   const [dir, setDir] = useState<'asc' | 'desc'>('desc');
@@ -67,8 +73,8 @@ export function DataTable<T>({
   };
 
   return (
-    <TableContainer sx={{ maxHeight: maxHeightCss ?? maxHeight }}>
-      <Table size={dense ? 'small' : 'medium'} stickyHeader={Boolean(maxHeightCss ?? maxHeight)}>
+    <TableContainer sx={fill ? { flex: 1, minHeight: 0 } : { maxHeight: maxHeightCss ?? maxHeight }}>
+      <Table size={dense ? 'small' : 'medium'} stickyHeader={fill || Boolean(maxHeightCss ?? maxHeight)}>
         <TableHead>
           <TableRow>
             {columns.map((c) => (

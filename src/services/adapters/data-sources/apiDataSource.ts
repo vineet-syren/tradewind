@@ -106,7 +106,9 @@ export class ApiDataSource implements CarbonDataSource {
     return this.get('/exceptions', params as Record<string, unknown>);
   }
 
-  getRecommendations(params?: ScopeParams & { laneId?: string; plannedOnly?: boolean }): Promise<Recommendation[]> {
+  getRecommendations(
+    params?: ScopeParams & { laneId?: string; plannedOnly?: boolean; shippedOnly?: boolean },
+  ): Promise<Recommendation[]> {
     return this.get('/recommendations', params as Record<string, unknown>);
   }
   getFocusKpis(params: { persona?: PersonaId; filters?: ShipmentFilters }): Promise<KpiMetric[]> {

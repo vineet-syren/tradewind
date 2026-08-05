@@ -51,7 +51,7 @@ export function ValueHero({
             textTransform: 'uppercase',
           }}
         >
-          Avoidable across the network
+          Avoidable across the network · shipments already moved
         </Typography>
         <Typography
           sx={{ mt: 1.25, fontWeight: 800, lineHeight: 1.25, fontSize: { xs: '1.5rem', md: '2rem' }, textWrap: 'balance' }}

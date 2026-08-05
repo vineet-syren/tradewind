@@ -1,4 +1,5 @@
 import { Box, Dialog, DialogContent, DialogTitle, IconButton, Stack, Typography } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import CloseRounded from '@mui/icons-material/CloseRounded';
 import type { ReactNode } from 'react';
 import { useDataSource } from '@/hooks/useDataSource';
@@ -30,7 +31,6 @@ export function ShipmentDetailDialog({ shipmentId, onClose }: { shipmentId: stri
   const ds = useDataSource();
   const { data: s, status } = useAsync(() => (shipmentId ? ds.getShipment(shipmentId) : Promise.resolve(null)), [shipmentId]);
   const open = Boolean(shipmentId);
-  const best = s?.options.find((o) => !o.isCurrent);
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
@@ -74,16 +74,28 @@ export function ShipmentDetailDialog({ shipmentId, onClose }: { shipmentId: stri
               <Fact label="Mode chain" value={s.modePath.join(' → ')} />
             </Box>
 
-            {s.derivedFromRef && (
-              <Box sx={{ p: 1.25, borderRadius: 1.5, bgcolor: 'action.hover', mb: 2.5 }}>
-                <Typography variant="caption" sx={{ fontWeight: 700, display: 'block' }}>
-                  Still to be planned
+            {s.dataOrigin === 'synthetic' && s.derivedFromRef && (
+              <Box
+                sx={{
+                  p: 1.25,
+                  borderRadius: 1.5,
+                  border: 1,
+                  borderColor: (t) => alpha(t.palette.warning.main, 0.4),
+                  bgcolor: (t) => alpha(t.palette.warning.main, 0.07),
+                  mb: 2.5,
+                }}
+              >
+                <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', color: 'warning.dark' }}>
+                  Forward book · not in the workbook
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
-                  Rolled forward from a real shipment one year earlier — same product, weight, gateway and distances, with only
-                  the dates moved.
+                  The workbook is a closed record ending 30 Jun 2024 — every row in it has already shipped. This one is a
+                  real {s.mirrorsReportingYear ?? 'workbook'} shipment with its dates rolled forward into the planning
+                  window, so there is something left to decide. Product, weight, gateway, container, every distance and
+                  every emission factor are the recorded shipment's; only the dates move. It is not counted in the
+                  reported footprint or the ESG report.
                 </Typography>
-                <SourceRef refs={[s.derivedFromRef]} label="Derived from" />
+                <SourceRef refs={[s.derivedFromRef]} label="Rolled forward from" />
               </Box>
             )}
 
@@ -95,17 +107,18 @@ export function ShipmentDetailDialog({ shipmentId, onClose }: { shipmentId: stri
             </Box>
 
             <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-              {s.options.length > 1 ? 'Route options the workbook evidences' : 'Route as recorded'}
+              {s.options.length > 1 ? 'Route optimisation — every option the workbook evidences' : 'Route as recorded'}
             </Typography>
             <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr', sm: 'repeat(2,1fr)' } }}>
               {s.options.map((o) => (
-                <ScenarioCard key={o.id} option={o} recommended={!o.isCurrent && o.id === best?.id} compact />
+                <ScenarioCard key={o.id} option={o} compact />
               ))}
             </Box>
             {s.options.length === 1 && (
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.5 }}>
-                No alternative appears here because the workbook records no other routing that would reach this destination for
-                less. Options are never invented.
+                {s.alternativesConsidered > 0
+                  ? `This is already the optimised route: ${s.alternativesConsidered} other routing${s.alternativesConsidered === 1 ? '' : 's'} the workbook records for this shipment ${s.alternativesConsidered === 1 ? 'was' : 'were'} priced on its own weight and distances, and ${s.alternativesConsidered === 1 ? 'it costs' : 'all cost'} more.`
+                  : 'The workbook records no other routing that would reach this destination, so there is nothing to compare against. Options are never invented.'}
               </Typography>
             )}
 

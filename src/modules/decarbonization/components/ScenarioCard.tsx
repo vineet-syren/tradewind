@@ -15,18 +15,19 @@ import { formatDistance, formatLitres, formatTonnes } from '@/utils/format';
  * Purely informative: there is no execution action here; the decision happens in
  * Terova's own booking systems. Freight cost and SLA risk are absent because the
  * workbook has no column for either.
+ *
+ * Which card is the optimised route is decided in the data, not here — exactly
+ * one option per shipment carries `isOptimised`, and it is the booked route
+ * itself whenever nothing the workbook records beats it.
  */
 export function ScenarioCard({
   option,
-  recommended = false,
   selected = false,
   onClick,
   taken = false,
   compact = false,
 }: {
   option: RouteOption;
-  /** Mark the lowest-CO₂e alternative so the eye lands on it first. */
-  recommended?: boolean;
   selected?: boolean;
   onClick?: () => void;
   /** Mark this as the route actually taken (shipped freight — read-only). */
@@ -36,6 +37,8 @@ export function ScenarioCard({
 }) {
   const color = OPTION_COLORS[option.kind] ?? '#64748b';
   const saves = option.co2eDeltaTonnes < 0;
+  /** The booked route is itself the optimised one — nothing recorded beats it. */
+  const alreadyOptimised = option.isOptimised && option.isCurrent;
   const distanceKm = option.legs.reduce((s, l) => s + l.distanceKm, 0);
   const fuelLitres = option.legs.reduce((s, l) => s + (l.fuelLitres ?? 0), 0);
 
@@ -62,13 +65,33 @@ export function ScenarioCard({
               {option.tagline}
             </Typography>
           </Box>
-          {taken ? (
-            <Chip size="small" label="Route taken" sx={{ bgcolor: alpha('#5C6B72', 0.16), fontWeight: 700, flexShrink: 0 }} />
-          ) : recommended ? (
-            <Chip size="small" label="Suggested" sx={{ bgcolor: alpha(color, 0.14), color, fontWeight: 700, flexShrink: 0 }} />
-          ) : option.isCurrent ? (
-            <Chip size="small" label="Today" sx={{ bgcolor: alpha('#5C6B72', 0.16), fontWeight: 700, flexShrink: 0 }} />
-          ) : null}
+          <Stack spacing={0.5} alignItems="flex-end" sx={{ flexShrink: 0 }}>
+            {option.isOptimised && (
+              <Chip
+                size="small"
+                icon={<VerifiedRoundedIcon sx={{ fontSize: 14 }} />}
+                label={alreadyOptimised ? 'Already optimised' : 'Optimised route'}
+                title={
+                  alreadyOptimised
+                    ? 'The lowest-CO₂e routing the workbook records for this shipment is the one it was booked on'
+                    : 'The lowest-CO₂e routing the workbook records for this shipment'
+                }
+                sx={{
+                  bgcolor: alpha(alreadyOptimised ? '#5C6B72' : color, 0.14),
+                  color: alreadyOptimised ? 'text.secondary' : color,
+                  fontWeight: 800,
+                  '& .MuiChip-icon': { color: 'inherit' },
+                }}
+              />
+            )}
+            {option.isCurrent && (taken || !option.isOptimised) && (
+              <Chip
+                size="small"
+                label={taken ? 'Route taken' : 'Today'}
+                sx={{ bgcolor: alpha('#5C6B72', 0.16), fontWeight: 700 }}
+              />
+            )}
+          </Stack>
         </Stack>
 
         {/* Mode chain — what actually changes about the journey */}

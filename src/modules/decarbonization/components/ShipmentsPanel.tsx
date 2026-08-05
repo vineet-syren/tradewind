@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Box, Card, CardContent, MenuItem, Stack, Tab, Tabs, TextField, Typography } from '@mui/material';
+import { Box, Card, CardContent, Chip, MenuItem, Stack, Tab, Tabs, TextField, Typography } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import ArrowForwardRounded from '@mui/icons-material/ArrowForwardRounded';
 import { ChartContainer } from '@/components/charts/ChartContainer';
 import { OptionCompareChart } from '@/components/charts/OptionCompareChart';
@@ -17,6 +18,7 @@ import { useAsync } from '@/hooks/useAsync';
 import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
 import { setSelectedLane } from '@/app/store/uiSlice';
 import type { Lane, RouteOption, Shipment, ShipmentDetail } from '@/types';
+import { ORIGIN_COLOR, ORIGIN_LABEL } from '@/constants/app';
 import { formatTonnes, formatIntensity, formatDistance, formatWeightTonnes, formatDate } from '@/utils/format';
 
 const ROUTE_COUNTS = [5, 8, 12, 20];
@@ -57,11 +59,11 @@ export function ShipmentsPanel() {
       ];
       if (cut > 0.0005) {
         out.push(
-          `On the best routing the workbook itself records, that shipment would emit **${formatTonnes(lane.bestPerShipmentTonnes)}** instead — about **${cutPct}% less**. Across every shipment on this lane it is **${formatTonnes(lane.avoidableTonnes)}**, and the suggestion is **${lane.bestOptionLabel}**.`,
+          `On the optimised route — **${lane.bestOptionLabel}**, a routing the workbook itself runs — that shipment would emit **${formatTonnes(lane.bestPerShipmentTonnes)}** instead, about **${cutPct}% less**. Across every shipment on this lane it is **${formatTonnes(lane.avoidableTonnes)}**.`,
         );
       } else {
         out.push(
-          `No cheaper routing appears here: every option the workbook records for these ports already costs at least what the current route does.`,
+          `This route is already the optimised one: every other routing the workbook records for these ports costs at least what it does.`,
         );
       }
       if (lane.hasAirFreight) {
@@ -116,7 +118,7 @@ export function ShipmentsPanel() {
       <CardContent>
         <EmptyState
           title="Select a shipment"
-          description="Pick a shipment in the register on the left — or a route on the map — to compare its options: CO₂e, transit, distance and fuel, side by side, with the workbook cell behind each figure."
+          description="Pick a shipment in the register on the left — or a route on the map — to see its optimised route: CO₂e, transit, distance and fuel against every option the workbook evidences, with the source cell behind each figure."
         />
       </CardContent>
     </Card>
@@ -129,7 +131,7 @@ export function ShipmentsPanel() {
           title="Outbound shipment network"
           subtitle={
             activeLaneId
-              ? 'Every option the workbook records for this route — hover a leg for its distance, factor and source cell'
+              ? 'The optimised route and every option it was chosen from — hover a leg for its distance, factor and source cell'
               : `Showing the top ${mapLanes.length} of ${exportLanes.length} lanes · click one to trace it end to end`
           }
           insights={networkInsights}
@@ -199,8 +201,8 @@ function NetworkMap({
   const [optionId, setOptionId] = useState<string | undefined>(undefined);
 
   const options = shipment?.options ?? lane?.options;
-  // Open on the suggested option, so the map shows the change, not the status quo.
-  const best = options?.find((o) => !o.isCurrent) ?? options?.[0];
+  // Open on the optimised route, so the map shows the change, not the status quo.
+  const best = options?.find((o) => o.isOptimised) ?? options?.[0];
   const active = options?.find((o) => o.id === optionId) ?? best;
 
   return (
@@ -257,25 +259,32 @@ function ShipmentRoutePanel({ shipmentId, onOpenLane }: { shipmentId: string; on
 
   if (status === 'loading' || !s) return <TableSkeleton rows={6} />;
 
-  const best = s.options.find((o) => !o.isCurrent);
+  const best = s.options.find((o) => o.isOptimised && !o.isCurrent);
   const active = s.options.find((o) => o.id === optionId) ?? best ?? s.options[0];
   const isPast = s.status !== 'Planned';
+  const alts = s.alternativesConsidered;
+
+  // Past and planned shipments get the same optimiser and the same cards; only
+  // the tense changes — hindsight on what a booked route cost, a choice on what
+  // an unbooked one will.
+  const note = best
+    ? isPast
+      ? `This shipment has already moved, so the routing decision is history — but the optimised route below is one the workbook itself ran, and it would have saved ${formatTonnes(s.avoidableTonnes)} (${Math.round(s.avoidablePct)}%). Every option is priced on this shipment's own weight and distances.`
+      : `Still to be planned. The optimised route below saves ${formatTonnes(s.avoidableTonnes)} (${Math.round(s.avoidablePct)}%) against the route as booked today. Compare CO₂e, transit, distance and fuel — booking happens in your own systems.`
+    : alts > 0
+      ? `Already the optimised route. ${alts} other routing${alts === 1 ? '' : 's'} the workbook records ${alts === 1 ? 'was' : 'were'} priced on this shipment's own weight and distances, and ${alts === 1 ? 'it costs' : 'all cost'} more.`
+      : 'The workbook records no other routing that reaches this destination, so there is nothing to compare against. Options are never invented.';
 
   return (
     <Stack spacing={2}>
       <ShipmentFactsCard s={s} />
       <RouteOptions
-        title={`Route options · ${s.destPort}`}
+        title={`Route optimisation · ${s.destPort}`}
         subtitle={`${s.category} · ${s.reportingYear}`}
-        note={
-          isPast
-            ? 'This shipment has already moved — the routing decision was made at booking. Below is the route as executed, with the alternatives the workbook shows were available.'
-            : 'Still to be planned. Compare CO₂e, transit, distance and fuel; the suggested option is marked. Booking happens in your own systems.'
-        }
+        note={note}
         options={s.options}
         activeId={active?.id}
         onSelect={setOptionId}
-        bestId={best?.id}
         takenId={isPast ? s.options.find((o) => o.isCurrent)?.id : undefined}
         onOpenLane={onOpenLane}
       />
@@ -294,18 +303,21 @@ function LaneRoutePanel({ lane, onOpenLane }: { lane?: Lane; onOpenLane: () => v
   useEffect(() => setOptionId(undefined), [lane?.laneId]);
 
   if (status === 'loading' || !detail) return <TableSkeleton rows={6} />;
-  const best = detail.options.find((o) => !o.isCurrent);
+  const best = detail.options.find((o) => o.isOptimised && !o.isCurrent);
   const active = detail.options.find((o) => o.id === optionId) ?? best ?? detail.options[0];
 
   return (
     <RouteOptions
-      title={`Route options · ${detail.destPort}`}
+      title={`Route optimisation · ${detail.destPort}`}
       subtitle={`${detail.shipmentCount} shipments · ${detail.annualFrequency}/yr · ${detail.category}`}
-      note="Options for a representative shipment on this lane. Pick a specific shipment in the register for its own figures."
+      note={
+        best
+          ? `Optimised for a representative shipment on this lane — the one with the most at stake. Pick a specific shipment in the register for its own figures.`
+          : `A representative shipment on this lane is already on its optimised route. Pick a specific shipment in the register for its own figures.`
+      }
       options={detail.options}
       activeId={active?.id}
       onSelect={setOptionId}
-      bestId={best?.id}
       onOpenLane={onOpenLane}
     />
   );
@@ -319,7 +331,6 @@ function RouteOptions({
   options,
   activeId,
   onSelect,
-  bestId,
   takenId,
   onOpenLane,
 }: {
@@ -329,7 +340,6 @@ function RouteOptions({
   options: RouteOption[];
   activeId?: string;
   onSelect: (id: string) => void;
-  bestId?: string;
   takenId?: string;
   onOpenLane: () => void;
 }) {
@@ -373,7 +383,6 @@ function RouteOptions({
             key={o.id}
             option={o}
             selected={o.id === active?.id}
-            recommended={o.id === bestId}
             taken={o.id === takenId}
             onClick={() => onSelect(o.id)}
           />
@@ -418,7 +427,32 @@ function ShipmentFactsCard({ s }: { s: ShipmentDetail }) {
             Shipment · {s.shipmentId}
           </Typography>
           <StatusChip status={s.status} />
+          <Chip
+            size="small"
+            variant="outlined"
+            label={ORIGIN_LABEL[s.dataOrigin]}
+            title={
+              s.dataOrigin === 'synthetic'
+                ? `The workbook is a closed record ending 30 Jun 2024, so the forward book is added on top of it. This is a real ${s.mirrorsReportingYear ?? 'workbook'} shipment with its dates rolled forward — product, weight, gateway, distances and factors are the recorded shipment's. It is not counted in the reported footprint or the ESG report.`
+                : 'Read directly from Transport Downstream- V02.xlsx'
+            }
+            sx={{
+              height: 20,
+              fontSize: 10.5,
+              fontWeight: 700,
+              color: ORIGIN_COLOR[s.dataOrigin],
+              borderColor: alpha(ORIGIN_COLOR[s.dataOrigin], 0.45),
+              bgcolor: alpha(ORIGIN_COLOR[s.dataOrigin], 0.07),
+            }}
+          />
         </Stack>
+        {s.dataOrigin === 'synthetic' && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            Forward book — the workbook is a closed record ending 30 Jun 2024, so this is a real{' '}
+            {s.mirrorsReportingYear ?? 'workbook'} shipment with its dates rolled forward into the planning window.
+            Every distance and factor below is the recorded shipment's, and it is not counted in the reported footprint.
+          </Typography>
+        )}
         {/* Endpoints labelled Source / Destination so the arrow reads clearly */}
         <Stack direction="row" alignItems="flex-start" spacing={1.25} sx={{ mt: 0.25, mb: 1.5 }}>
           <Place name={s.origin} label="Source" />

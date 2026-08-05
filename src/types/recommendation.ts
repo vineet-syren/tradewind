@@ -5,7 +5,12 @@ import type { PersonaId } from './persona';
  * The action types the workbook can evidence. Each maps 1:1 onto an
  * `OptionKind` so a recommendation is always "take option X on shipment Y".
  */
-export type ActionType = 'gateway-swap' | 'shorter-sea' | 'sea-instead-of-air' | 'consolidate';
+export type ActionType =
+  | 'shorter-first-mile'
+  | 'gateway-swap'
+  | 'shorter-sea'
+  | 'sea-instead-of-air'
+  | 'consolidate';
 
 export interface EvidenceItem {
   label: string;

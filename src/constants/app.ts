@@ -1,12 +1,34 @@
 /**
  * App-wide constants.
  *
- * `APP_TODAY` is the day after the last dispatch date in the source workbook —
- * the app positions itself the morning after the data closes, so "still to be
- * planned" means exactly that. It must stay in step with `ASSUMPTIONS.asOf`
- * emitted by `scripts/generate-mock-data.mjs`.
+ * `APP_TODAY` is the day the app treats as now. Anything dated on or after it is
+ * the forward book — the only rows in the dataset that are not read from the
+ * workbook. It must stay in step with `ASSUMPTIONS.asOf` emitted by
+ * `scripts/generate-mock-data.mjs`.
  */
-export const APP_TODAY = '2024-07-01';
+export const APP_TODAY = '2026-08-01';
+
+/**
+ * Last dispatch the workbook records. Every movement up to here is real and
+ * already shipped; the gap between here and `APP_TODAY` is deliberately left
+ * empty rather than filled in, so no reported figure is ever part-invented.
+ */
+export const WORKBOOK_DATA_TO = '2024-06-30';
+
+/**
+ * How the two data origins are labelled. Every synthetic row is also a planned
+ * one, so the label states the thing the status chip beside it does not: whether
+ * the row came out of the source workbook at all.
+ */
+export const ORIGIN_LABEL: Record<string, string> = {
+  workbook: 'From workbook',
+  synthetic: 'Not in workbook',
+};
+
+export const ORIGIN_COLOR: Record<string, string> = {
+  workbook: '#0f766e',
+  synthetic: '#b45309',
+};
 
 /** Add days to a YYYY-MM-DD string (UTC), returning YYYY-MM-DD. */
 export function addDaysISO(iso: string, n: number): string {
@@ -36,6 +58,7 @@ export const MODE_COLORS: Record<string, string> = {
 /** Route-option colours — current is neutral, alternatives are shades of green. */
 export const OPTION_COLORS: Record<string, string> = {
   current: '#64748b',
+  'shorter-first-mile': '#0d9488',
   'gateway-swap': '#10b981',
   'shorter-sea': '#0ea5e9',
   'sea-instead-of-air': '#059669',

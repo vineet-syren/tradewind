@@ -3,12 +3,18 @@ import TrainRoundedIcon from '@mui/icons-material/TrainRounded';
 import RouteRoundedIcon from '@mui/icons-material/RouteRounded';
 import DirectionsBoatRoundedIcon from '@mui/icons-material/DirectionsBoatRounded';
 import Inventory2RoundedIcon from '@mui/icons-material/Inventory2Rounded';
+import LocalShippingRoundedIcon from '@mui/icons-material/LocalShippingRounded';
 
 /**
  * Plain-English meaning of each action type — shown wherever an action appears.
- * These are the only four the workbook can evidence.
+ * These are the only five levers the workbook can evidence.
  */
 export const TYPE_META: Record<string, { label: string; desc: string; icon: ReactElement }> = {
+  'shorter-first-mile': {
+    label: 'Shorter first mile',
+    desc: 'Same gateway, same sailing, but the shorter factory-to-port run the workbook records elsewhere for that gateway. Road carbon is charged per kilometre driven, so the inland distance is the whole saving.',
+    icon: <LocalShippingRoundedIcon />,
+  },
   'gateway-swap': {
     label: 'Different gateway',
     desc: 'Leave India through another port, on the inland chain that port already uses. Trades a long truck run for a short one plus rail.',

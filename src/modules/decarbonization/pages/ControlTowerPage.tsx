@@ -23,7 +23,15 @@ export default function ControlTowerPage() {
   const ds = useDataSource();
   const persona = useAppSelector((s) => s.persona.current);
   const filters = useAppSelector((s) => s.filters.value);
-  const { data: recs } = useAsync(() => ds.getRecommendations({ persona, filters }), [persona, filters]);
+  // Recorded shipments only. The hero is the headline claim about the network —
+  // "this is what your own history shows was on the table" — so it is pinned to
+  // freight that actually moved and stays there even when the page is filtered
+  // to the forward book. The forward book has its own numbers, on the shipments
+  // it belongs to.
+  const { data: recs } = useAsync(
+    () => ds.getRecommendations({ persona, filters, shippedOnly: true }),
+    [persona, filters],
+  );
 
   const hero = useMemo(() => {
     const open = recs ?? [];

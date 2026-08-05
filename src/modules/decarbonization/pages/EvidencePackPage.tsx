@@ -1,15 +1,18 @@
-import { Box, Card, CardContent, Chip, Divider, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from '@mui/material';
+import { useState } from 'react';
+import { Box, Button, Card, CardContent, Chip, Divider, MenuItem, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import FactCheckRounded from '@mui/icons-material/FactCheckRounded';
 import WaterfallChartRounded from '@mui/icons-material/WaterfallChartRounded';
 import ShowChartRounded from '@mui/icons-material/ShowChartRounded';
 import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded';
 import InfoRoundedIcon from '@mui/icons-material/InfoRounded';
+import VerifiedRoundedIcon from '@mui/icons-material/VerifiedRounded';
+import DownloadRoundedIcon from '@mui/icons-material/DownloadRounded';
+import PrintRoundedIcon from '@mui/icons-material/PrintRounded';
+import TableChartRounded from '@mui/icons-material/TableChartRounded';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ScopeNote } from '@/components/layout/ScopeNote';
 import { ChartContainer } from '@/components/charts/ChartContainer';
-import { MoMTrendChart } from '@/components/charts/MoMTrendChart';
-import { YearOverYearChart } from '@/components/charts/YearOverYearChart';
 import { ReductionTrendChart } from '@/components/charts/ReductionTrendChart';
 import { WaterfallChart, type WaterfallStep } from '@/components/charts/WaterfallChart';
 import { KpiCard } from '@/components/cards/KpiCard';
@@ -18,64 +21,139 @@ import { ChartSkeleton } from '@/components/loaders/Skeletons';
 import { SeverityChip, SourceRef } from '@/components/shared/Chips';
 import { useDataSource } from '@/hooks/useDataSource';
 import { useAsync } from '@/hooks/useAsync';
-import { useAppSelector } from '@/app/store/hooks';
-import { insightsForMonthlyTrend, insightsForReportingYears } from '@/utils/insights';
+import {
+  insightsForBridge,
+  insightsForDataIssues,
+  insightsForFactors,
+  insightsForMonthlyTrend,
+  insightsForReconciliation,
+  insightsForYearDetail,
+} from '@/utils/insights';
+import { buildEsgCsv, downloadTextFile } from '@/utils/reportExport';
 import { formatDate, formatIntensity, formatNumber, formatPercent, formatTonnes } from '@/utils/format';
-import type { ReconciliationStep } from '@/types';
+import type { ReconciliationStep, ReportingYearFootprint, YearShare } from '@/types';
 
 /**
  * The reporting surface: what Tradewind reports, how it ties back to the total
  * the workbook itself prints, the methodology behind it, and the rows in the
  * source data that need fixing.
  */
+const ALL_YEARS = 'all';
+
 export default function EvidencePackPage() {
   const ds = useDataSource();
-  const persona = useAppSelector((s) => s.persona.current);
   const { data: evidence } = useAsync(() => ds.getEvidence(), []);
   const { data: factors } = useAsync(() => ds.getEmissionFactors(), []);
   const { data: assumptions } = useAsync(() => ds.getAssumptions(), []);
-  const { data: footprint } = useAsync(() => ds.getFootprint({ persona }), [persona]);
   const { data: exceptions } = useAsync(() => ds.getExceptions(), []);
+  // Every persona reports on the same figures — the lens changes emphasis
+  // elsewhere in the app, never the reported total — so the year selector is
+  // shared and the report is identical whoever is signing it.
+  const [yearId, setYearId] = useState<string>(ALL_YEARS);
 
   if (!evidence || !assumptions) return <ChartSkeleton height={480} />;
 
-  const latest = evidence.years.at(-1)!;
-  const baseline = evidence.years[0];
+  // Recorded reporting years only. A synthetic year can never be selected here:
+  // the pack exists to be tied back to the sheet.
+  const allYears = evidence.years;
+  const scopedYears = yearId === ALL_YEARS ? allYears : allYears.filter((y) => y.reportingYear === yearId);
+  const selected = scopedYears.length === 1 ? scopedYears[0] : null;
+
+  const latest = allYears.at(-1)!;
+  const baseline = allYears[0];
   const dataIssues = (exceptions ?? []).filter((e) => e.kind === 'data-quality');
+
+  // Headline figures follow the selection, so the KPI row always describes what
+  // the rest of the page is showing.
+  const head = selected
+    ? {
+        label: `CO₂e · ${selected.reportingYear}`,
+        co2e: selected.allLegsCo2eTonnes,
+        intensity: selected.intensity,
+        shipments: selected.shipments,
+        from: selected.from,
+        to: selected.to,
+        avoidable: selected.avoidableTonnes,
+      }
+    : {
+        label: `CO₂e · all ${allYears.length} recorded years`,
+        co2e: allYears.reduce((s, y) => s + y.allLegsCo2eTonnes, 0),
+        intensity: latest.intensity,
+        shipments: allYears.reduce((s, y) => s + y.shipments, 0),
+        from: baseline.from,
+        to: latest.to,
+        avoidable: allYears.reduce((s, y) => s + y.avoidableTonnes, 0),
+      };
+
+  // Prior year, for the change figure — only meaningful on a single selection.
+  const priorYear = selected ? allYears[allYears.indexOf(selected) - 1] : null;
+  const changePct = selected
+    ? priorYear
+      ? ((selected.allLegsCo2eTonnes - priorYear.allLegsCo2eTonnes) / priorYear.allLegsCo2eTonnes) * 100
+      : null
+    : evidence.changeSinceBaselinePct;
+
   // Chart the year whose bridge actually has adjustments to show.
-  const bridgeYear = [...evidence.years].sort((a, b) => b.reconciliation.length - a.reconciliation.length)[0];
-  const cut = evidence.changeSinceBaselinePct < 0;
+  const bridgeYear = [...scopedYears].sort((a, b) => b.reconciliation.length - a.reconciliation.length)[0] ?? latest;
+
+  // Months inside the selection, and never a synthetic one — this is the report.
+  const reportMonths = evidence.monthly.filter(
+    (m) => m.dataOrigin === 'workbook' && scopedYears.some((y) => m.period >= y.from.slice(0, 7) && m.period <= y.to.slice(0, 7)),
+  );
+
+  const download = () => {
+    downloadTextFile(
+      `terova-scope3-transport-${selected ? selected.reportingYear.toLowerCase() : 'all-years'}.csv`,
+      buildEsgCsv({ evidence, years: scopedYears, factors: factors ?? [], generatedOn: assumptions.asOf }),
+    );
+  };
 
   return (
     <Box>
       <PageHeader
         overline="Report · Scope 3 downstream transportation"
         title="Footprint &amp; Evidence"
-        subtitle={`Everything here comes from ${evidence.workbook}. Each reporting year is tied line by line to the total the workbook prints for that tab.`}
+        subtitle={`Everything on this page comes from ${evidence.workbook} and nothing else. The synthetic rows that bridge the workbook to today are excluded here in full — only ${evidence.years.map((y) => y.reportingYear).join(', ')} are reportable, and each is tied line by line to the total the workbook prints for that tab.`}
         actions={<ScopeNote showFilters={false} />}
+      />
+
+      <ReportScopeBar
+        years={allYears}
+        value={yearId}
+        onChange={setYearId}
+        onDownload={download}
+        onPrint={() => window.print()}
       />
 
       <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(4, 1fr)' }, mb: 3 }}>
         <KpiCard
           metric={{
             id: 'latest',
-            label: `CO₂e · ${latest.reportingYear}`,
-            value: latest.allLegsCo2eTonnes,
+            label: head.label,
+            value: head.co2e,
             unit: 'tonnes',
             intent: 'neutral',
-            hint: `${latest.shipments} movements · ${formatDate(latest.from)} – ${formatDate(latest.to)}`,
+            hint: `${head.shipments} movements · ${formatDate(head.from)} – ${formatDate(head.to)}`,
             icon: 'co2e',
           }}
         />
         <KpiCard
           metric={{
             id: 'change',
-            label: `Change since ${baseline.reportingYear}`,
-            value: evidence.changeSinceBaselinePct,
+            label: selected
+              ? priorYear
+                ? `Change vs ${priorYear.reportingYear}`
+                : 'Change — baseline year'
+              : `Change since ${baseline.reportingYear}`,
+            value: changePct ?? 0,
             unit: 'percent',
-            display: formatPercent(evidence.changeSinceBaselinePct, 1),
-            intent: cut ? 'positive' : 'risk',
-            hint: `${formatTonnes(baseline.allLegsCo2eTonnes)} → ${formatTonnes(latest.allLegsCo2eTonnes)}`,
+            display: changePct == null ? '—' : formatPercent(changePct, 1),
+            intent: changePct == null ? 'neutral' : changePct < 0 ? 'positive' : 'risk',
+            hint: selected
+              ? priorYear
+                ? `${formatTonnes(priorYear.allLegsCo2eTonnes)} → ${formatTonnes(selected.allLegsCo2eTonnes)}`
+                : 'nothing recorded before this year'
+              : `${formatTonnes(baseline.allLegsCo2eTonnes)} → ${formatTonnes(latest.allLegsCo2eTonnes)}`,
             icon: 'evidence',
           }}
         />
@@ -83,18 +161,18 @@ export default function EvidencePackPage() {
           metric={{
             id: 'intensity',
             label: 'Intensity',
-            value: latest.intensity,
+            value: head.intensity,
             unit: 'intensity',
             intent: 'neutral',
-            hint: `against ${formatIntensity(baseline.intensity)} in the baseline year`,
+            hint: selected && priorYear ? `against ${formatIntensity(priorYear.intensity)} the year before` : `against ${formatIntensity(baseline.intensity)} in the baseline year`,
             icon: 'lanes',
           }}
         />
         <KpiCard
           metric={{
             id: 'avoidable',
-            label: 'Avoidable on proven routes',
-            value: footprint?.avoidableTonnes ?? 0,
+            label: 'Avoidable on optimised routes',
+            value: head.avoidable,
             unit: 'tonnes',
             intent: 'opportunity',
             hint: 're-costed on routings the workbook records',
@@ -109,9 +187,10 @@ export default function EvidencePackPage() {
           title="Reconciliation to the workbook"
           subtitle="From the total each tab prints, to the total Tradewind reports — every line read from the sheet"
           icon={<FactCheckRounded sx={{ fontSize: 18 }} />}
+          insights={insightsForReconciliation(scopedYears)}
         >
           <Stack spacing={2.5}>
-            {evidence.years.map((y) => (
+            {scopedYears.map((y) => (
               <Box key={y.reportingYear}>
                 <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1, flexWrap: 'wrap' }} useFlexGap>
                   <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
@@ -148,33 +227,6 @@ export default function EvidencePackPage() {
           </Stack>
         </ChartContainer>
 
-        <Box sx={{ display: 'grid', gap: 3, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' } }}>
-          <ChartContainer
-            title="Reported footprint by year"
-            subtitle="Bars are total CO₂e, the line is intensity — the workbook's own Jul–Jun windows"
-            icon={<ShowChartRounded sx={{ fontSize: 18 }} />}
-            insights={footprint ? insightsForReportingYears(footprint.byReportingYear) : undefined}
-          >
-            {footprint ? (
-              <YearOverYearChart
-                data={footprint.byReportingYear.filter((y) => !y.reportingYear.includes('planned'))}
-                height={260}
-              />
-            ) : (
-              <ChartSkeleton height={260} />
-            )}
-          </ChartContainer>
-
-          <ChartContainer
-            title="Actual against the best proven route"
-            subtitle="The dashed line is the same month re-costed on the lowest-carbon routing the workbook records — the gap is what was avoidable"
-            icon={<ShowChartRounded sx={{ fontSize: 18 }} />}
-            insights={insightsForMonthlyTrend(evidence.monthly)}
-          >
-            <ReductionTrendChart data={evidence.monthly} height={260} />
-          </ChartContainer>
-        </Box>
-
         {/* The bridge as a waterfall — the same numbers as the table above, read
             left to right. Shown for the year with the most adjustments, since a
             year that ties exactly is just two identical bars. */}
@@ -186,20 +238,43 @@ export default function EvidencePackPage() {
               : 'This year needs no adjustment — the two totals are the same figure'
           }
           icon={<WaterfallChartRounded sx={{ fontSize: 18 }} />}
+          insights={insightsForBridge(bridgeYear)}
         >
           <WaterfallChart data={bridgeSteps(bridgeYear.reconciliation)} height={300} />
         </ChartContainer>
 
+        {/* Where the selected year's CO₂e actually sits. This is the year-wise
+            detail the report needs; the trend charts that used to sit here are
+            on Emission Hotspots, which is the page built for them. */}
         <ChartContainer
-          title="Monthly CO₂e"
-          subtitle="Every month the workbook covers · drag the brush to zoom"
-          icon={<ShowChartRounded sx={{ fontSize: 18 }} />}
+          title={selected ? `${selected.reportingYear} in detail` : 'Every recorded year in detail'}
+          subtitle="The same CO₂e split four ways — each figure read straight from the workbook"
+          icon={<TableChartRounded sx={{ fontSize: 18 }} />}
+          insights={insightsForYearDetail(scopedYears)}
         >
-          <MoMTrendChart data={evidence.monthly.map((m) => ({ label: m.period, value: m.co2eTonnes }))} height={260} />
+          <Stack spacing={3}>
+            {scopedYears.map((y) => (
+              <YearBreakdown key={y.reportingYear} year={y} showTitle={scopedYears.length > 1} />
+            ))}
+          </Stack>
+        </ChartContainer>
+
+        <ChartContainer
+          title="Actual against the best proven route"
+          subtitle="The dashed line is the same month re-costed on the lowest-carbon routing the workbook records — the gap is what was avoidable"
+          icon={<ShowChartRounded sx={{ fontSize: 18 }} />}
+          insights={insightsForMonthlyTrend(reportMonths)}
+          isEmpty={reportMonths.length === 0}
+        >
+          <ReductionTrendChart data={reportMonths} height={280} />
         </ChartContainer>
 
         {/* Emission factors, with the basis spelled out */}
-        <ChartContainer title="Emission factors" subtitle="As stated in the workbook — the basis is what matters most">
+        <ChartContainer
+          title="Emission factors"
+          subtitle="As stated in the workbook — the basis is what matters most"
+          insights={insightsForFactors(factors ?? [])}
+        >
           <Box sx={{ overflowX: 'auto' }}>
             <Table size="small">
               <TableHead>
@@ -307,6 +382,7 @@ export default function EvidencePackPage() {
           <ChartContainer
             title="Rows to fix in the source workbook"
             subtitle="Found while rebuilding the shipments — each one is a place the sheet contradicts itself"
+            insights={insightsForDataIssues(dataIssues)}
           >
             <Stack spacing={1.5}>
               {dataIssues.map((e) => (
@@ -337,12 +413,154 @@ export default function EvidencePackPage() {
             <Typography variant="caption" color="text.secondary">
               Source: <b>{evidence.workbook}</b> — {evidence.workbookTitle}. Data covers{' '}
               {formatDate(assumptions.dataFrom)} to {formatDate(assumptions.dataTo)} across{' '}
-              {assumptions.reportingYears.length} reporting years, {formatNumber(footprint?.shipmentCount ?? 0)} movements
-              in the current scope. The app treats {formatDate(assumptions.asOf)} as today — the day after the workbook closes.
+              {assumptions.reportingYears.length} recorded reporting years and{' '}
+              {formatNumber(allYears.reduce((n, y) => n + y.shipments, 0))} movements. The app treats{' '}
+              {formatDate(assumptions.asOf)} as today; the synthetic rows bridging the workbook to that date are excluded
+              from this page entirely.
             </Typography>
           </CardContent>
         </Card>
       </Stack>
+    </Box>
+  );
+}
+
+/**
+ * Reporting-year selector and the export actions.
+ *
+ * Only years the workbook actually records appear here. The synthetic years
+ * that bridge the data to today are deliberately absent: this page is the one
+ * place in the application whose figures are meant to be quoted, so there is no
+ * way to accidentally scope it to a generated year.
+ */
+function ReportScopeBar({
+  years,
+  value,
+  onChange,
+  onDownload,
+  onPrint,
+}: {
+  years: ReportingYearFootprint[];
+  value: string;
+  onChange: (v: string) => void;
+  onDownload: () => void;
+  onPrint: () => void;
+}) {
+  return (
+    <Card sx={{ mb: 3, '@media print': { display: 'none' } }}>
+      <CardContent sx={{ py: 1.75 }}>
+        <Stack direction="row" alignItems="center" spacing={2} flexWrap="wrap" useFlexGap>
+          <Box>
+            <Typography
+              variant="caption"
+              sx={{ color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: 11, display: 'block' }}
+            >
+              Reporting year
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Financial years as the workbook defines them — July to June
+            </Typography>
+          </Box>
+
+          <TextField
+            select
+            size="small"
+            label="Reporting year"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            sx={{ width: 260 }}
+          >
+            <MenuItem value={ALL_YEARS}>All recorded years ({years.length})</MenuItem>
+            {[...years].reverse().map((y) => (
+              <MenuItem key={y.reportingYear} value={y.reportingYear}>
+                {y.reportingYear} · {formatDate(y.from)} – {formatDate(y.to)}
+              </MenuItem>
+            ))}
+          </TextField>
+
+          <Chip
+            size="small"
+            icon={<VerifiedRoundedIcon sx={{ fontSize: 15, color: 'inherit !important' }} />}
+            label="Workbook figures only"
+            title="No synthetic, modelled or forecast row is included anywhere on this page or in its exports"
+            sx={{ fontWeight: 700, color: 'success.dark', bgcolor: (t) => alpha(t.palette.success.main, 0.14) }}
+          />
+
+          <Stack direction="row" spacing={1} sx={{ ml: 'auto' }}>
+            <Button size="small" variant="contained" startIcon={<DownloadRoundedIcon />} onClick={onDownload}>
+              Download report (CSV)
+            </Button>
+            <Button size="small" variant="outlined" startIcon={<PrintRoundedIcon />} onClick={onPrint}>
+              Print / save PDF
+            </Button>
+          </Stack>
+        </Stack>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** One reporting year split four ways — the year-wise detail the report needs. */
+function YearBreakdown({ year, showTitle }: { year: ReportingYearFootprint; showTitle: boolean }) {
+  const splits: { title: string; rows: YearShare[] }[] = [
+    { title: 'By product category', rows: year.byCategory },
+    { title: 'By destination port', rows: year.byDestPort },
+    { title: 'By gateway port', rows: year.byGateway },
+    { title: 'By transport mode', rows: year.byMode },
+  ];
+  return (
+    <Box>
+      {showTitle && (
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.25 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>
+            {year.reportingYear}
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            {formatTonnes(year.allLegsCo2eTonnes)} · {year.shipments} movements · {formatIntensity(year.intensity)}
+          </Typography>
+        </Stack>
+      )}
+      <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' } }}>
+        {splits.map((s) => (
+          <Box key={s.title} sx={{ border: 1, borderColor: 'divider', borderRadius: 2, overflow: 'hidden' }}>
+            <Typography variant="caption" sx={{ fontWeight: 800, display: 'block', px: 1.5, py: 1, bgcolor: 'action.hover' }}>
+              {s.title}
+            </Typography>
+            <Box sx={{ overflowX: 'auto' }}>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Label</TableCell>
+                    <TableCell align="right">CO₂e</TableCell>
+                    <TableCell align="right">Share</TableCell>
+                    <TableCell align="right">Movements</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {s.rows.map((r) => (
+                    <TableRow key={r.label}>
+                      <TableCell sx={{ maxWidth: 220 }}>
+                        <Typography variant="body2" noWrap title={r.label}>
+                          {r.label}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                        {formatTonnes(r.co2eTonnes)}
+                      </TableCell>
+                      <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                        {formatPercent(r.pct, 1)}
+                      </TableCell>
+                      <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                        {r.shipments}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Box>
+          </Box>
+        ))}
+      </Box>
     </Box>
   );
 }

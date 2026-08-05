@@ -19,7 +19,7 @@ export function LaneDetailContent({ laneId }: { laneId: string }) {
   if (!lane) return <Typography color="text.secondary">Lane not found.</Typography>;
 
   const current = lane.options.find((o) => o.isCurrent);
-  const best = lane.options.find((o) => !o.isCurrent);
+  const best = lane.options.find((o) => o.isOptimised && !o.isCurrent);
   const cutPct =
     current && best && current.co2eTonnes > 0
       ? Math.round(((current.co2eTonnes - best.co2eTonnes) / current.co2eTonnes) * 100)
@@ -44,7 +44,7 @@ export function LaneDetailContent({ laneId }: { laneId: string }) {
 
       <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: 'repeat(2, 1fr)' }}>
         <Metric label="Total CO₂e" value={formatTonnes(lane.totalCo2eTonnes)} />
-        <Metric label="Avoidable on proven routes" value={formatTonnes(lane.avoidableTonnes)} accent />
+        <Metric label="Avoidable on optimised routes" value={formatTonnes(lane.avoidableTonnes)} accent />
         <Metric label="Shipments" value={`${lane.shipmentCount}${lane.plannedShipmentCount ? ` · ${lane.plannedShipmentCount} to plan` : ''}`} />
         <Metric label="Intensity" value={formatIntensity(lane.avgCo2ePerTonneKm)} />
         <Metric label="Gateways used" value={lane.gateways.join(' / ') || '—'} />
@@ -87,8 +87,8 @@ export function LaneDetailContent({ laneId }: { laneId: string }) {
               </Brief>
             ) : (
               <Brief>
-                No cheaper routing appears for this lane. Every option the workbook records for these ports already costs at least what
-                the current route does.
+                This lane is already on its optimised route. Every other routing the workbook records for these ports costs at
+                least what the current one does.
               </Brief>
             )}
             {lane.hasAirFreight && (
@@ -119,11 +119,11 @@ export function LaneDetailContent({ laneId }: { laneId: string }) {
       {lane.options.length > 1 && (
         <Box>
           <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>
-            Route options
+            Route optimisation
           </Typography>
           <Stack spacing={1.5}>
             {lane.options.map((o) => (
-              <ScenarioCard key={o.id} option={o} recommended={!o.isCurrent && o.id === best?.id} />
+              <ScenarioCard key={o.id} option={o} />
             ))}
           </Stack>
         </Box>

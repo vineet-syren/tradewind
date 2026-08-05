@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Box, Card, CardContent, Chip, Collapse, Stack, Typography } from '@mui/material';
 import { alpha, useTheme } from '@mui/material/styles';
 import AutoAwesomeRoundedIcon from '@mui/icons-material/AutoAwesomeRounded';
+import InboxRoundedIcon from '@mui/icons-material/InboxRounded';
 import type { ReactNode } from 'react';
 
 /** Render `**bold**` segments in insight strings as highlighted text. */
@@ -19,6 +20,9 @@ export function ChartContainer({
   children,
   height,
   insights,
+  fill = false,
+  isEmpty = false,
+  emptyMessage = 'Nothing matches the current filters. Clear one and this comes back.',
 }: {
   title?: string;
   subtitle?: string;
@@ -29,14 +33,27 @@ export function ChartContainer({
   height?: number;
   /** Deterministic findings computed from the chart's own data — renders the "Insights" toggle. */
   insights?: string[];
+  /**
+   * True when the chart has no rows to draw. A chart with nothing in it renders
+   * as a tall blank panel, which reads as a broken page rather than an empty
+   * one — so say so instead, in the space the chart would have taken.
+   */
+  isEmpty?: boolean;
+  emptyMessage?: string;
+  /**
+   * Give the body whatever height is left in a parent of definite height, so a
+   * scrollable child (a long table) fills the card instead of the card growing
+   * to fit it. Needs an ancestor that actually has a height to give.
+   */
+  fill?: boolean;
 }) {
   const theme = useTheme();
   const [showInsights, setShowInsights] = useState(false);
   const hasInsights = Boolean(insights && insights.length > 0);
 
   return (
-    <Card sx={{ height: '100%' }}>
-      <CardContent>
+    <Card sx={{ height: '100%', ...(fill && { display: 'flex', flexDirection: 'column', minHeight: 0 }) }}>
+      <CardContent sx={fill ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } : undefined}>
         {(title || action || hasInsights) && (
           <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1} sx={{ mb: 1.5 }}>
             <Stack direction="row" spacing={1.25} alignItems="flex-start">
@@ -119,7 +136,21 @@ export function ChartContainer({
             </Box>
           </Collapse>
         )}
-        <Box sx={{ height }}>{children}</Box>
+        {isEmpty ? (
+          <Stack
+            spacing={1}
+            alignItems="center"
+            justifyContent="center"
+            sx={{ py: 4, px: 2, textAlign: 'center', ...(fill && { flex: 1, minHeight: 0 }) }}
+          >
+            <InboxRoundedIcon sx={{ fontSize: 30, color: 'text.disabled' }} />
+            <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 420 }}>
+              {emptyMessage}
+            </Typography>
+          </Stack>
+        ) : (
+          <Box sx={{ height, ...(fill && { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }) }}>{children}</Box>
+        )}
       </CardContent>
     </Card>
   );

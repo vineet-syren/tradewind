@@ -24,7 +24,13 @@ import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
 import { setSelectedLane } from '@/app/store/uiSlice';
 import type { Lane } from '@/types';
 import { MODE_COLORS } from '@/constants/app';
-import { insightsForHotspots, insightsForRegionModes } from '@/utils/insights';
+import {
+  insightsForDestModes,
+  insightsForHotspots,
+  insightsForLanePriority,
+  insightsForLaneTable,
+  insightsForRegionModes,
+} from '@/utils/insights';
 import { formatTonnes, formatIntensity, formatWeightTonnes, formatNumber } from '@/utils/format';
 
 const SLICES = [
@@ -85,11 +91,19 @@ export default function ProductCustomerLanesPage() {
   );
 
   // Destination × mode, so the mode mix per market is visible at a glance.
+  //
+  // Split by where the CO₂e was actually produced, not by the lane's dominant
+  // mode. Attributing a lane's whole footprint to its primary mode hid every
+  // road and rail leg behind the ocean leg that outweighed them, which made the
+  // road share — the part a routing decision can move — invisible.
   const destModeRows = useMemo(() => {
     const m = new Map<string, { name: string; Ocean: number; Rail: number; Road: number; Air: number }>();
     for (const l of exportLanes) {
       const r = m.get(l.destPort) ?? { name: l.destPort, Ocean: 0, Rail: 0, Road: 0, Air: 0 };
-      r[l.primaryMode] += l.totalCo2eTonnes;
+      r.Ocean += l.oceanCo2eTonnes;
+      r.Rail += l.railCo2eTonnes;
+      r.Road += l.roadCo2eTonnes;
+      r.Air += l.airCo2eTonnes;
       m.set(l.destPort, r);
     }
     return [...m.values()].sort(
@@ -111,7 +125,28 @@ export default function ProductCustomerLanesPage() {
     { key: 'category', header: 'Product', render: (l) => l.category, sortValue: (l) => l.category },
     { key: 'market', header: 'Market', render: (l) => l.market, sortValue: (l) => l.market },
     { key: 'gateway', header: 'Gateway', render: (l) => l.gateways.join(' / ') || '—', sortValue: (l) => l.primaryGateway },
-    { key: 'mode', header: 'Mode', render: (l) => <ModeChip mode={l.primaryMode} />, sortValue: (l) => l.primaryMode },
+    {
+      key: 'mode',
+      header: 'Modes',
+      // Every mode the lane actually uses, in travel order. A single chip for
+      // the dominant mode read as "this lane is ocean", hiding the road and rail
+      // legs that a routing decision can actually change.
+      render: (l) => (
+        <Stack direction="row" spacing={0.4} alignItems="center" flexWrap="wrap" useFlexGap>
+          {l.modesUsed.map((m, i) => (
+            <Stack key={m} direction="row" spacing={0.4} alignItems="center">
+              <ModeChip mode={m} />
+              {i < l.modesUsed.length - 1 && (
+                <Box component="span" sx={{ color: 'text.disabled', fontSize: 12 }}>
+                  ›
+                </Box>
+              )}
+            </Stack>
+          ))}
+        </Stack>
+      ),
+      sortValue: (l) => l.modesUsed.join('>'),
+    },
     {
       key: 'shipments',
       header: 'Shipments',
@@ -212,7 +247,7 @@ export default function ProductCustomerLanesPage() {
           <KpiCard
             metric={{
               id: 'avoid',
-              label: 'Avoidable on proven routes',
+              label: 'Avoidable on optimised routes',
               value: footprint.avoidableTonnes,
               unit: 'tonnes',
               intent: 'opportunity',
@@ -241,7 +276,7 @@ export default function ProductCustomerLanesPage() {
             icon={<CategoryRounded sx={{ fontSize: 18 }} />}
             insights={insightsForHotspots(sliceRows, sliceMeta.noun)}
             action={
-              <TextField select size="small" label="Slice by" value={slice} onChange={(e) => setSlice(e.target.value as SliceKey)} sx={{ width: 190 }}>
+              <TextField select size="small" label="Slice by" value={slice} onChange={(e) => setSlice(e.target.value as SliceKey)} sx={{ width: 220 }}>
                 {SLICES.map((s) => (
                   <MenuItem key={s.key} value={s.key}>
                     {s.label}
@@ -260,8 +295,10 @@ export default function ProductCustomerLanesPage() {
           <Box sx={{ display: 'grid', gap: 3, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' } }}>
             <ChartContainer
               title="Destination × mode"
-              subtitle="How each market's freight actually travels"
+              subtitle="How each market's freight actually travels — split by the leg that produced the CO₂e"
               icon={<StackedBarChartRounded sx={{ fontSize: 18 }} />}
+              insights={insightsForDestModes(destModeRows)}
+              isEmpty={destModeRows.length === 0}
             >
               <ModeStackedBar rows={destModeRows} height={320} />
             </ChartContainer>
@@ -280,15 +317,18 @@ export default function ProductCustomerLanesPage() {
             title="Lane priority"
             subtitle="Volume against intensity, sized by what is recoverable — high and to the right is where to start"
             icon={<ScatterPlotRounded sx={{ fontSize: 18 }} />}
+            insights={insightsForLanePriority(exportLanes)}
+            isEmpty={bubbles.length === 0}
           >
             <ScatterBubbleChart
               points={bubbles}
               xLabel="Freight moved (t)"
               yLabel="Intensity (g CO₂e / t·km)"
               sizeLabel="Avoidable CO₂e"
-              xFormat={(v) => `${formatNumber(v)} t`}
+              // Sub-tonne lanes are real here, and a plain tonne format renders
+              // several distinct ticks as an identical "0 t".
+              xFormat={(v) => formatWeightTonnes(v)}
               yFormat={(v) => formatIntensity(v)}
-              refX={footprint?.avgIntensity}
               height={340}
             />
             <SwatchLegend
@@ -298,8 +338,9 @@ export default function ProductCustomerLanesPage() {
 
           <ChartContainer
             title="All lanes"
-            subtitle="Click a row to open that lane's full breakdown and route options"
+            subtitle="Click a row to open that lane's full breakdown and optimised route"
             icon={<TableRowsRounded sx={{ fontSize: 18 }} />}
+            insights={insightsForLaneTable(exportLanes)}
           >
             {!lanes ? (
               <TableSkeleton rows={8} />

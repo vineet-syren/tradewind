@@ -1,4 +1,4 @@
-import type { ModeLabel } from './common';
+import type { DataOrigin, ModeLabel } from './common';
 import type { Lane } from './lane';
 
 export interface ModeSplitRow {
@@ -21,6 +21,15 @@ export interface ReportingYearPoint {
   weightTonnes: number;
   intensity: number;
   shipments: number;
+  /** `synthetic` when any row in the year is mirrored rather than recorded. */
+  dataOrigin: DataOrigin;
+  /** Shipments in the year not yet dispatched — a year with any is incomplete. */
+  plannedShipments: number;
+  /**
+   * True when the year has not reached its June year-end yet, so its total is a
+   * part-year figure and must not be compared like for like with a closed one.
+   */
+  isPartial: boolean;
 }
 
 /** Computed downstream-transportation footprint for the active scope. */
