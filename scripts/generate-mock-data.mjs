@@ -1351,6 +1351,13 @@ const filterOptions = {
   destPorts: uniq(exportRows.map((s) => s.destPort)).sort(),
   gateways: uniq(exportRows.map((s) => s.gateway).filter(Boolean)).sort(),
   reportingYears: uniq(enriched.map((s) => s.reportingYear)).sort(),
+  // Real span per reporting year. The tabs do not tile a clean Jul→Jun calendar
+  // (FY21-22 ends 12 May 2022, FY22-23 starts 1 Jun 2022), so a preset derived
+  // from the label straddles two of them.
+  reportingYearWindows: uniq(enriched.map((s) => s.reportingYear)).sort().map((ry) => {
+    const dates = enriched.filter((x) => x.reportingYear === ry).map((x) => x.date).sort();
+    return { reportingYear: ry, from: dates[0], to: dates.at(-1) };
+  }),
   /** Recorded years only — what the ESG report is allowed to be scoped to. */
   workbookReportingYears: src.years.map((y) => y.reportingYear),
 };

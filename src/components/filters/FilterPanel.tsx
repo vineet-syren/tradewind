@@ -69,7 +69,7 @@ export function FilterPanel({ showSearch = true }: { showSearch?: boolean }) {
             <DateRangeFilter
               value={{ dateFrom: filters.dateFrom, dateTo: filters.dateTo }}
               onChange={(patch) => dispatch(patchFilters(patch))}
-              reportingYears={opts.reportingYears}
+              reportingYearWindows={opts.reportingYearWindows}
             />
             <MultiSelectFilter label="Region" options={opts.regions} value={filters.regions ?? []} onChange={(v) => dispatch(patchFilters({ regions: v }))} width={138} />
             <MultiSelectFilter label="Market" options={opts.markets} value={filters.markets ?? []} onChange={(v) => dispatch(patchFilters({ markets: v }))} width={150} />

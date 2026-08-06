@@ -255,16 +255,28 @@ export class MockDataSource implements CarbonDataSource {
 /**
  * Reconcile the caller's date window with what the query is asking for.
  *
- * The default window stops at today, which would hide the very shipments a
- * planned-only query is about — so that case opens the window forward. A
- * shipped-only query is the opposite and must hold even against a user filter
- * that reaches into the future, so it closes the window at today outright.
+ * Both cases *narrow* the user's window; neither replaces it. An earlier version
+ * dropped `dateFrom` for shipped-only queries, which made the Control Tower hero
+ * report every year at once while the register beside it honoured the filter —
+ * two different totals on one screen. So: keep whatever the user picked and only
+ * clamp the end (shipped) or the start (planned) against today.
  */
 function scopeWindow(
   filters: ShipmentFilters,
   { plannedOnly, shippedOnly }: { plannedOnly?: boolean; shippedOnly?: boolean },
 ): ShipmentFilters {
-  if (shippedOnly) return { ...filters, dateFrom: undefined, dateTo: addDaysISO(APP_TODAY, -1) };
-  if (plannedOnly && !filters.dateFrom && !filters.dateTo) return { ...filters, dateFrom: APP_TODAY };
+  if (shippedOnly) {
+    const lastShipped = addDaysISO(APP_TODAY, -1);
+    return {
+      ...filters,
+      dateTo: filters.dateTo && filters.dateTo < lastShipped ? filters.dateTo : lastShipped,
+    };
+  }
+  if (plannedOnly) {
+    return {
+      ...filters,
+      dateFrom: filters.dateFrom && filters.dateFrom > APP_TODAY ? filters.dateFrom : APP_TODAY,
+    };
+  }
   return filters;
 }

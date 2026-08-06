@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { MenuItem, Stack, TextField } from '@mui/material';
 import { APP_TODAY, addDaysISO } from '@/constants/app';
+import type { ReportingYearWindow } from '@/types';
 
 export interface DateRange {
   dateFrom?: string;
@@ -8,34 +9,28 @@ export interface DateRange {
 }
 
 /**
- * A reporting year label ("FY23-24") as its Jul→Jun date window.
- *
- * The whole application works in the workbook's own reporting years, so the
- * presets do too — offering calendar years here would cut every one of them in
- * half. The list is built from the years the data actually holds rather than
- * from a date range, so no empty year can appear in the menu.
- */
-function fyPreset(label: string): { id: string; label: string; range: DateRange } | null {
-  const m = /^FY(\d{2})-(\d{2})$/.exec(label.trim());
-  if (!m) return null;
-  const start = 2000 + Number(m[1]);
-  return { id: `fy${start}`, label, range: { dateFrom: `${start}-07-01`, dateTo: `${start + 1}-06-30` } };
-}
-
-/**
  * Named presets, anchored to the app's today: everything already shipped, the
  * forward book, then each reporting year present in the data.
+ *
+ * Each year's range is the span the workbook actually records for that tab, not
+ * a Jul→Jun window guessed from the label. The tabs do not tile cleanly —
+ * FY21-22 ends 12 May 2022 while FY22-23 starts 1 Jun 2022 — so a guessed window
+ * swept June 2022 shipments into "FY21-22" and the page then disagreed with
+ * itself about how many shipments that year held.
  */
-function buildPresets(reportingYears: string[]): { id: string; label: string; range: DateRange }[] {
+function buildPresets(windows: ReportingYearWindow[]): { id: string; label: string; range: DateRange }[] {
   return [
     // Everything shipped to date — the full historical record, no forward book.
     { id: 'actuals', label: 'All actuals', range: { dateTo: addDaysISO(APP_TODAY, -1) } },
     // From today forward. No end date, so the whole forward book is in scope.
     { id: 'planned', label: 'To be planned', range: { dateFrom: APP_TODAY } },
-    ...[...reportingYears]
-      .sort((a, b) => b.localeCompare(a))
-      .map(fyPreset)
-      .filter((p): p is NonNullable<typeof p> => p !== null),
+    ...[...windows]
+      .sort((a, b) => b.reportingYear.localeCompare(a.reportingYear))
+      .map((w) => ({
+        id: `fy-${w.reportingYear}`,
+        label: w.reportingYear,
+        range: { dateFrom: w.from, dateTo: w.to },
+      })),
   ];
 }
 
@@ -47,14 +42,14 @@ function buildPresets(reportingYears: string[]): { id: string; label: string; ra
 export function DateRangeFilter({
   value,
   onChange,
-  reportingYears = [],
+  reportingYearWindows = [],
 }: {
   value: DateRange;
   onChange: (patch: DateRange) => void;
-  /** Reporting years present in the data — one preset each, newest first. */
-  reportingYears?: string[];
+  /** Reporting years and the dates they span — one preset each, newest first. */
+  reportingYearWindows?: ReportingYearWindow[];
 }) {
-  const presets = useMemo(() => buildPresets(reportingYears), [reportingYears]);
+  const presets = useMemo(() => buildPresets(reportingYearWindows), [reportingYearWindows]);
   const preset = (() => {
     if (!value.dateFrom && !value.dateTo) return 'none';
     const hit = presets.find(
