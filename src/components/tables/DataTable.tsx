@@ -32,6 +32,7 @@ export function DataTable<T>({
   maxHeightCss,
   selectedRowKey,
   fill = false,
+  fixedLayout = false,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -46,8 +47,21 @@ export function DataTable<T>({
   /**
    * Take whatever height a flex-column parent has left and scroll inside it,
    * rather than sizing to the rows. Wins over both max-height props.
+   *
+   * Prefer `maxHeightCss` with a viewport-relative clamp. This only works when
+   * the parent's height is definite *and* generous: in the split-pane register
+   * the cards and controls stacked above the table left it 25px to scroll 79 rows
+   * in. Whatever is left over is not a height you can rely on.
    */
   fill?: boolean;
+  /**
+   * Lay the table out to its container width instead of to its content, so
+   * declared column widths hold and long cells ellipsis rather than pushing the
+   * table wider. Needed in narrow panes: with the default auto layout the
+   * register wanted 877px inside a 445px split pane and scrolled sideways under
+   * its own header.
+   */
+  fixedLayout?: boolean;
 }) {
   const [sortKey, setSortKey] = useState<string | undefined>(initialSortKey);
   const [dir, setDir] = useState<'asc' | 'desc'>('desc');
@@ -74,7 +88,11 @@ export function DataTable<T>({
 
   return (
     <TableContainer sx={fill ? { flex: 1, minHeight: 0 } : { maxHeight: maxHeightCss ?? maxHeight }}>
-      <Table size={dense ? 'small' : 'medium'} stickyHeader={fill || Boolean(maxHeightCss ?? maxHeight)}>
+      <Table
+        size={dense ? 'small' : 'medium'}
+        stickyHeader={fill || Boolean(maxHeightCss ?? maxHeight)}
+        sx={fixedLayout ? { tableLayout: 'fixed' } : undefined}
+      >
         <TableHead>
           <TableRow>
             {columns.map((c) => (

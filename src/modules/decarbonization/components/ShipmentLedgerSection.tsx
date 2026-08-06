@@ -146,14 +146,23 @@ export function ShipmentLedgerSection({
       key: 'lane',
       header: 'Lane',
       render: (s) => (
-        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+        <Typography variant="body2" noWrap sx={{ fontWeight: 600, maxWidth: 190 }} title={`${s.origin} → ${s.destPort}`}>
           {s.origin} → {s.destPort}
         </Typography>
       ),
       sortValue: (s) => s.destPort,
     },
     { key: 'gateway', header: 'Gateway', render: (s) => s.gateway ?? '—', sortValue: (s) => s.gateway ?? '' },
-    { key: 'product', header: 'Product', render: (s) => s.productName, sortValue: (s) => s.productName },
+    {
+      key: 'product',
+      header: 'Product',
+      render: (s) => (
+        <Typography variant="body2" noWrap sx={{ maxWidth: 260 }} title={s.productName}>
+          {s.productName}
+        </Typography>
+      ),
+      sortValue: (s) => s.productName,
+    },
     { key: 'category', header: 'Category', render: (s) => s.category, sortValue: (s) => s.category },
     {
       key: 'mode',
@@ -184,7 +193,9 @@ export function ShipmentLedgerSection({
       key: 'co2e',
       header: 'CO₂e',
       align: 'right',
-      render: (s) => <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{formatTonnes(s.co2eTonnes)}</strong>,
+      render: (s) => (
+        <strong style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{formatTonnes(s.co2eTonnes)}</strong>
+      ),
       sortValue: (s) => s.co2eTonnes,
     },
     {
@@ -193,7 +204,10 @@ export function ShipmentLedgerSection({
       align: 'right',
       render: (s) =>
         s.avoidableTonnes > 0.0005 ? (
-          <Typography variant="body2" sx={{ fontWeight: 700, color: 'success.main', fontVariantNumeric: 'tabular-nums' }}>
+          <Typography
+            variant="body2"
+            sx={{ fontWeight: 700, color: 'success.main', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}
+          >
             {formatTonnes(s.avoidableTonnes)}
           </Typography>
         ) : (
@@ -214,17 +228,29 @@ export function ShipmentLedgerSection({
 
   // Compact view (for the split layout) keeps only the essentials — the full
   // detail opens in the panel alongside.
-  const compactKeys = ['id', 'date', 'status', 'lane', 'product', 'co2e', 'avoidable'];
-  let columns = compact ? allColumns.filter((c) => compactKeys.includes(c.key)) : allColumns;
+  const compactKeys = ['date', 'lane', 'product', 'co2e', 'avoidable'];
+  // Percentages, so the five columns divide the split pane instead of demanding
+  // their content width and scrolling sideways.
+  const compactWidths: Record<string, string> = {
+    date: '21%',
+    lane: '21%',
+    product: '22%',
+    co2e: '18%',
+    avoidable: '18%',
+  };
+  let columns = compact
+    ? allColumns.filter((c) => compactKeys.includes(c.key)).map((c) => ({ ...c, width: compactWidths[c.key] }))
+    : allColumns;
   if (stream === 'collection') columns = columns.filter((c) => !['gateway', 'avoidable', 'eta'].includes(c.key));
 
   const handleRow = (s: Shipment) => (onRowSelect ? onRowSelect(s) : setSelected(s.shipmentId));
 
   return (
-    // In the split layout the parent hands down a definite height that tracks
-    // the panel opposite, so the register fills it and scrolls inside instead of
-    // ending short and leaving a gap beside a taller right-hand panel.
-    <Box sx={compact ? { height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 } : undefined}>
+    // In the split layout the parent hands down a minimum height that tracks the
+    // panel opposite, so the register stretches to fill rather than leaving a gap
+    // beside a taller right-hand panel. It is a floor, not a cap: the table keeps
+    // its own scroll window, so nothing here can squeeze it.
+    <Box sx={compact ? { display: 'flex', flexDirection: 'column', minHeight: 0 } : undefined}>
       <Card sx={{ mb: 2.5, flexShrink: 0 }}>
         <CardContent sx={{ py: 2 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap gap={2}>
@@ -264,7 +290,6 @@ export function ShipmentLedgerSection({
       </Card>
 
       <ChartContainer
-        fill={compact}
         title="Shipment register"
         guideKey="shipment-register"
         insights={rows.length ? insightsForRegister(rows) : undefined}
@@ -308,8 +333,12 @@ export function ShipmentLedgerSection({
             onRowClick={handleRow}
             selectedRowKey={selectedId ?? selected}
             initialSortKey="date"
-            fill={compact}
-            maxHeight={compact ? undefined : 620}
+            // The table owns a viewport-relative scroll window rather than
+            // taking whatever the pane has left over. Filling a definite pane
+            // height meant the cards and controls stacked above it could starve
+            // the table down to a couple of rows.
+            maxHeightCss="clamp(320px, 62vh, 760px)"
+            fixedLayout={compact}
           />
         )}
       </ChartContainer>

@@ -5,12 +5,16 @@ import { Box, useMediaQuery, useTheme } from '@mui/material';
  * Horizontal resizable two-pane split with a draggable divider. Below `md` it
  * stacks vertically (no divider). The user can drag to rebalance left vs right.
  *
- * The left pane is given a definite height that tracks the right one, so a long
- * left-hand list scrolls inside the split instead of leaving dead space beside a
- * taller right pane. Flex `stretch` cannot do this: the row's height is the
- * taller of the two panes' *content*, and an unbounded list is always taller. So
- * the right pane is measured and the left is sized from it — never the reverse,
+ * The left pane is given a *minimum* height that tracks the right one, so it
+ * stretches to fill rather than leaving dead space beside a taller right pane.
+ * The right pane is measured and the left sized from it — never the reverse,
  * which keeps the two from chasing each other.
+ *
+ * `minHeight`, not `height`, and that distinction matters: a definite height
+ * forces every child to fit inside it, and once the pane's own chrome is
+ * accounted for there can be almost nothing left. It squeezed the shipment
+ * register's table to 25px of scroll for 79 rows. A minimum lets the pane grow
+ * to its content while still never being shorter than its neighbour.
  */
 export function SplitPane({
   left,
@@ -108,7 +112,7 @@ export function SplitPane({
           minWidth: 0,
           display: 'flex',
           flexDirection: 'column',
-          height: rightHeight ? Math.max(rightHeight, minLeftHeight) : undefined,
+          minHeight: rightHeight ? Math.max(rightHeight, minLeftHeight) : undefined,
         }}
       >
         {left}
