@@ -13,6 +13,7 @@ import type {
   CopilotSuggestion,
   EmissionFactorRow,
   EsgEvidence,
+  WorkbookIndex,
   ExceptionItem,
   Footprint,
   FilterOptions,
@@ -58,6 +59,12 @@ export interface CarbonDataSource {
   getFootprint(params?: ScopeParams): Promise<Footprint>;
   getHotspots(params?: ScopeParams): Promise<Hotspots>;
   getEvidence(): Promise<EsgEvidence>;
+  /**
+   * The source spreadsheet, addressable by cell range. Supports the "open the
+   * cell behind this number" path; loaded lazily, since nothing on first paint
+   * needs it.
+   */
+  getWorkbook(): Promise<WorkbookIndex>;
   getExceptions(params?: ScopeParams): Promise<ExceptionItem[]>;
 
   /**

@@ -32,6 +32,7 @@ import {
   insightsForRegionModes,
 } from '@/utils/insights';
 import { formatTonnes, formatIntensity, formatWeightTonnes, formatNumber } from '@/utils/format';
+import { deriveAvoidable, deriveRanking, deriveTotalCo2e, deriveWeight } from '@/utils/derivations';
 
 const SLICES = [
   { key: 'category', label: 'Product category', noun: 'product category' },
@@ -56,6 +57,10 @@ export default function ProductCustomerLanesPage() {
   const { data: hotspots } = useAsync(() => ds.getHotspots({ persona, filters }), [persona, filters]);
   const { data: footprint } = useAsync(() => ds.getFootprint({ persona, filters }), [persona, filters]);
   const [slice, setSlice] = useState<SliceKey>('category');
+  const { data: scopedRows } = useAsync(
+    () => ds.getShipments({ persona, ...filters, pageSize: 5000 }).then((r) => r.items),
+    [persona, filters],
+  );
 
   // Export lanes only — collection runs have no destination market.
   const exportLanes = useMemo(() => (lanes ?? []).filter((l) => !l.laneId.startsWith('LN-COL-')), [lanes]);
@@ -211,6 +216,7 @@ export default function ProductCustomerLanesPage() {
       {footprint && (
         <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(4, 1fr)' }, mb: 3 }}>
           <KpiCard
+            derivation={scopedRows?.length ? deriveTotalCo2e(scopedRows) : undefined}
             metric={{
               id: 'co2e',
               label: 'CO₂e in scope',
@@ -222,6 +228,7 @@ export default function ProductCustomerLanesPage() {
             }}
           />
           <KpiCard
+            derivation={scopedRows?.length ? deriveWeight(scopedRows) : undefined}
             metric={{
               id: 'weight',
               label: 'Freight moved',
@@ -245,6 +252,7 @@ export default function ProductCustomerLanesPage() {
             }}
           />
           <KpiCard
+            derivation={scopedRows?.length ? deriveAvoidable(scopedRows) : undefined}
             metric={{
               id: 'avoid',
               label: 'Avoidable on optimised routes',
@@ -272,9 +280,11 @@ export default function ProductCustomerLanesPage() {
         <Stack spacing={3}>
           <ChartContainer
             title={`CO₂e by ${sliceMeta.noun}`}
+            guideKey="category-treemap"
             subtitle="Area is proportional to emissions · switch the slice to re-cut the same footprint"
             icon={<CategoryRounded sx={{ fontSize: 18 }} />}
             insights={insightsForHotspots(sliceRows, sliceMeta.noun)}
+            derivation={deriveRanking(sliceRows, sliceMeta.noun)}
             action={
               <TextField select size="small" label="Slice by" value={slice} onChange={(e) => setSlice(e.target.value as SliceKey)} sx={{ width: 220 }}>
                 {SLICES.map((s) => (
@@ -295,6 +305,7 @@ export default function ProductCustomerLanesPage() {
           <Box sx={{ display: 'grid', gap: 3, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' } }}>
             <ChartContainer
               title="Destination × mode"
+              guideKey="dest-mode"
               subtitle="How each market's freight actually travels — split by the leg that produced the CO₂e"
               icon={<StackedBarChartRounded sx={{ fontSize: 18 }} />}
               insights={insightsForDestModes(destModeRows)}
@@ -305,6 +316,7 @@ export default function ProductCustomerLanesPage() {
 
             <ChartContainer
               title="Region × mode"
+              guideKey="region-mode"
               subtitle="Column width is the region's share; height is its mode mix"
               icon={<ViewQuiltRounded sx={{ fontSize: 18 }} />}
               insights={insightsForRegionModes(hotspots.regionModeMatrix)}
@@ -315,6 +327,7 @@ export default function ProductCustomerLanesPage() {
 
           <ChartContainer
             title="Lane priority"
+            guideKey="lane-priority"
             subtitle="Volume against intensity, sized by what is recoverable — high and to the right is where to start"
             icon={<ScatterPlotRounded sx={{ fontSize: 18 }} />}
             insights={insightsForLanePriority(exportLanes)}
@@ -338,6 +351,7 @@ export default function ProductCustomerLanesPage() {
 
           <ChartContainer
             title="All lanes"
+            guideKey="lane-table"
             subtitle="Click a row to open that lane's full breakdown and optimised route"
             icon={<TableRowsRounded sx={{ fontSize: 18 }} />}
             insights={insightsForLaneTable(exportLanes)}

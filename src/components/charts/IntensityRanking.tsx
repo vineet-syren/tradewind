@@ -17,7 +17,21 @@ const GREEN = '#10b981';
  * first. Bars are colour-graded red → green by efficiency and carry a dashed
  * fleet-average marker, so the worst offenders read instantly.
  */
-export function IntensityRanking({ items, avg }: { items: IntensityRow[]; avg?: number }) {
+export function IntensityRanking({
+  items,
+  avg,
+  maxHeight = 380,
+}: {
+  items: IntensityRow[];
+  avg?: number;
+  /**
+   * Cap the list and scroll inside it. A ranking can hold thirty products; left
+   * unbounded it drags whatever card shares its grid row to the same height,
+   * which is how a 220px donut ended up in an 849px card with 542px of nothing
+   * in it. The rows past the cap are the ones nobody reads anyway.
+   */
+  maxHeight?: number;
+}) {
   if (!items.length) return null;
   const max = Math.max(...items.map((i) => i.value), avg ?? 0) * 1.08 || 1;
   const min = Math.min(...items.map((i) => i.value));
@@ -26,7 +40,7 @@ export function IntensityRanking({ items, avg }: { items: IntensityRow[]; avg?: 
     return t > 0.6 ? RED : t > 0.3 ? AMBER : GREEN;
   };
   return (
-    <Stack spacing={1.4}>
+    <Stack spacing={1.4} sx={{ maxHeight, overflowY: 'auto', pr: items.length > 8 ? 0.75 : 0 }}>
       {items.map((it) => {
         const color = tierColor(it.value);
         return (

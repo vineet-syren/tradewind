@@ -185,6 +185,7 @@ export default function EvidencePackPage() {
         {/* The audit bridge — the single most important thing on this page */}
         <ChartContainer
           title="Reconciliation to the workbook"
+          guideKey="reconciliation"
           subtitle="From the total each tab prints, to the total Tradewind reports — every line read from the sheet"
           icon={<FactCheckRounded sx={{ fontSize: 18 }} />}
           insights={insightsForReconciliation(scopedYears)}
@@ -232,6 +233,7 @@ export default function EvidencePackPage() {
             year that ties exactly is just two identical bars. */}
         <ChartContainer
           title={`How ${bridgeYear.reportingYear} bridges to the reported total`}
+          guideKey="bridge-waterfall"
           subtitle={
             bridgeYear.reconciliation.length > 2
               ? 'Printed workbook total, the adjustments, and what Tradewind reports'
@@ -248,6 +250,7 @@ export default function EvidencePackPage() {
             on Emission Hotspots, which is the page built for them. */}
         <ChartContainer
           title={selected ? `${selected.reportingYear} in detail` : 'Every recorded year in detail'}
+          guideKey="year-detail"
           subtitle="The same CO₂e split four ways — each figure read straight from the workbook"
           icon={<TableChartRounded sx={{ fontSize: 18 }} />}
           insights={insightsForYearDetail(scopedYears)}
@@ -261,6 +264,7 @@ export default function EvidencePackPage() {
 
         <ChartContainer
           title="Actual against the best proven route"
+          guideKey="reduction-trend"
           subtitle="The dashed line is the same month re-costed on the lowest-carbon routing the workbook records — the gap is what was avoidable"
           icon={<ShowChartRounded sx={{ fontSize: 18 }} />}
           insights={insightsForMonthlyTrend(reportMonths)}
@@ -272,6 +276,7 @@ export default function EvidencePackPage() {
         {/* Emission factors, with the basis spelled out */}
         <ChartContainer
           title="Emission factors"
+          guideKey="emission-factors"
           subtitle="As stated in the workbook — the basis is what matters most"
           insights={insightsForFactors(factors ?? [])}
         >
@@ -311,7 +316,9 @@ export default function EvidencePackPage() {
           </Box>
         </ChartContainer>
 
-        <Box sx={{ display: 'grid', gap: 3, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' } }}>
+        {/* `alignItems: start` so each card sizes to its own text. Stretching
+            them to match left ~400px of nothing under the shorter one. */}
+        <Box sx={{ display: 'grid', gap: 3, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, alignItems: 'start' }}>
           {/* Methodology */}
           <Card>
             <CardContent>
@@ -381,6 +388,7 @@ export default function EvidencePackPage() {
         {dataIssues.length > 0 && (
           <ChartContainer
             title="Rows to fix in the source workbook"
+            guideKey="data-issues"
             subtitle="Found while rebuilding the shipments — each one is a place the sheet contradicts itself"
             insights={insightsForDataIssues(dataIssues)}
           >

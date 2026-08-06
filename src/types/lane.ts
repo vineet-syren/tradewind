@@ -18,7 +18,15 @@ export interface RouteOption {
    */
   id: string;
   kind: OptionKind;
+  /**
+   * What kind of decision this is — "Different gateway", "Different sailing".
+   * Deliberately general: the cards are a menu of the levers available on this
+   * shipment, and a label that states the finding ("Shorter sea routing") reads
+   * as a conclusion before the reader has seen any numbers.
+   */
   label: string;
+  /** What this option concretely does — the finding, shown on hover and below the label. */
+  detail: string;
   tagline: string;
   legs: Leg[];
   modePath: ModeLabel[];
@@ -98,7 +106,7 @@ export interface Lane {
   plannedAvoidableTonnes: number;
   bestOptionKind: string | null;
   bestOptionLabel: string | null;
-  /** CO₂e for a representative shipment on the route as booked today. */
+  /** CO₂e for a representative shipment on the route this lane usually runs. */
   currentPerShipmentTonnes: number;
   /** Same shipment on the best workbook-evidenced option. */
   bestPerShipmentTonnes: number;

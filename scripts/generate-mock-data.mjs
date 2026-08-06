@@ -41,6 +41,9 @@ const SOURCE = join(__dirname, 'source', 'transport-downstream.json');
 
 const src = JSON.parse(readFileSync(SOURCE, 'utf8'));
 
+/** Tab name → reporting year, so a cell range can name its own year. */
+const TABS_BY_NAME = Object.fromEntries(src.years.map((y) => [y.tab, y.reportingYear]));
+
 // ── Emission factors, read back off the workbook rows ──────────────────────
 // Road is charged per truck-kilometre (so a 400 kg run costs what a 25 t run
 // does); rail, ocean and air are charged per tonne-kilometre.
@@ -538,13 +541,33 @@ let enriched = raw.map(rollup).map((s) => ({ ...s, laneId: laneIdOf(s) }));
 // 4. Route options — re-cost each shipment through evidenced chains
 // ══════════════════════════════════════════════════════════════════════════
 
+/**
+ * What each card is *called*, and what it *says*.
+ *
+ * The label names the kind of decision, nothing more — "Different gateway", not
+ * "Rail to Nhava Sheva". A reader scanning the cards should be able to see which
+ * levers exist for this shipment before reading a single number, and a label
+ * that already states the answer ("Shorter sea routing") is a finding dressed up
+ * as a category. The finding belongs in `detail`, which the bar chart shows on
+ * hover and the card prints underneath.
+ *
+ * `current` has no fixed label because "as booked" is only true of freight that
+ * has already moved. Nothing in the forward book is booked yet — that is the
+ * entire point of it — so the label is chosen per shipment below.
+ */
 const OPTION_META = {
-  current: { label: 'As booked today', tagline: 'The route this shipment is on' },
-  'shorter-first-mile': { label: 'Shorter first mile', tagline: 'Same gateway and sailing, shorter run to the port' },
+  current: { label: 'Route as shipped', tagline: 'The routing this shipment actually ran' },
+  'shorter-first-mile': { label: 'Different inland route', tagline: 'Same gateway and sailing, a different run to the port' },
   'gateway-swap': { label: 'Different gateway', tagline: 'Leave India through another port' },
-  'shorter-sea': { label: 'Shorter sea routing', tagline: 'Same two ports, shorter sailing' },
-  'sea-instead-of-air': { label: 'Send by sea', tagline: 'Ocean routing to the same country' },
-  consolidate: { label: 'Share the truck', tagline: 'One truck run for the same-day shipments' },
+  'shorter-sea': { label: 'Different sailing', tagline: 'Same two ports, a different recorded sea route' },
+  'sea-instead-of-air': { label: 'Different mode', tagline: 'Ocean routing instead of the flight' },
+  consolidate: { label: 'Combined truck load', tagline: 'One truck run shared with the same-day shipments' },
+};
+
+/** The booked route reads differently depending on whether it has happened. */
+const CURRENT_META = {
+  Delivered: { label: 'Route as shipped', tagline: 'The routing this shipment actually ran' },
+  Planned: { label: 'Usual routing', tagline: 'How this lane normally runs — nothing is booked yet' },
 };
 
 /**
@@ -558,11 +581,16 @@ function finishOption(kind, legs, gateway, current, extra) {
   const days = Math.round(sum(legs, (l) => l.transitDaysEst));
   const delta = current ? co2e - current.co2eTonnes : 0;
   const modes = uniq(legs.map((l) => l.modeLabel));
-  // A gateway swap is named after what actually changes inland, so the label can
-  // never claim rail on an all-road routing.
-  const label = kind === 'gateway-swap'
+  // The specific finding — what this option concretely does. It is named after
+  // what actually changes inland, so it can never claim rail on an all-road
+  // routing. Shown on hover and beneath the card's general label.
+  const detail = kind === 'gateway-swap'
     ? `${modes.includes('Rail') ? 'Rail' : 'Road'} to ${gateway}`
-    : OPTION_META[kind].label;
+    : (extra?.detail ?? OPTION_META[kind].tagline);
+  const label = kind === 'current' ? (CURRENT_META[extra?.status]?.label ?? OPTION_META.current.label) : OPTION_META[kind].label;
+  const tagline = kind === 'current'
+    ? (CURRENT_META[extra?.status]?.tagline ?? OPTION_META.current.tagline)
+    : OPTION_META[kind].tagline;
   const seaKm = sum(legs.filter((l) => l.mode === 'ocean' || l.mode === 'air'), (l) => l.distanceKm);
   return {
     // Two options can share a kind (two gateways, two recorded sailings for one
@@ -571,7 +599,8 @@ function finishOption(kind, legs, gateway, current, extra) {
     id: `${kind}:${slug(gateway ?? 'none')}:${Math.round(seaKm)}:${Math.round(inlandKmOf(legs))}`,
     kind,
     label,
-    tagline: OPTION_META[kind].tagline,
+    detail,
+    tagline,
     legs: legs.map((l, i) => ({ ...l, seq: i + 1 })),
     modePath: uniq(legs.map((l) => l.modeLabel)),
     gateway,
@@ -615,6 +644,8 @@ for (const s of enriched) {
 function buildOptions(s) {
   const weight = s.weightTonnes;
   const current = finishOption('current', s.legs, s.gateway, null, {
+    status: s.status,
+    detail: `${uniq(s.legs.map((l) => l.modeLabel)).join(' → ')}${s.gateway ? ` via ${s.gateway}` : ''}`,
     timesUsedInWorkbook: 1,
     evidence: `Recorded on tab ${s.sourceRef.split('!')[0]} of the workbook.`,
     evidenceRefs: [s.sourceRef],
@@ -646,6 +677,7 @@ function buildOptions(s) {
     for (const routing of best ? (INLAND_ROUTINGS.get(best.source) ?? []) : []) {
       const legs = [...costInlandRouting(routing, weight), costPerTonneKmLeg(best, 'ocean', weight, 99)];
       add(finishOption('sea-instead-of-air', legs, best.source, current, {
+        detail: `Send by sea — ${best.source} → ${best.dest}, ${nf(best.distanceKm)} km`,
         timesUsedInWorkbook: best.count,
         // The mode swap is the headline, but it is not always the whole story:
         // reaching a seaport can mean a completely different inland run from the
@@ -695,6 +727,9 @@ function buildOptions(s) {
       const moved = diff.filter((d) => d.mode !== 'ocean' && Math.abs(d.deltaKm) > 0.5);
       const unchanged = diff.filter((d) => d.mode !== 'ocean' && Math.abs(d.deltaKm) <= 0.5 && d.fromKm > 0);
       add(finishOption('shorter-first-mile', legs, s.gateway, current, {
+        detail: moved.length
+          ? `Shorter first mile — ${moved.map((d) => `${d.mode} ${nf(d.fromKm)} → ${nf(d.toKm)} km`).join(', ')}`
+          : 'Shorter first mile',
         timesUsedInWorkbook: routing.count,
         evidence: `Same gateway, same sailing — only the run to ${s.gateway} changes. `
           + moved
@@ -724,6 +759,7 @@ function buildOptions(s) {
       const seaDelta = oceanLeg.distanceKm - oceanEntry.distanceKm;
       const seaSaving = oceanLeg.co2eTonnes - legs[legs.length - 1].co2eTonnes;
       add(finishOption('shorter-sea', legs, s.gateway, current, {
+        detail: `${seaDelta > 0 ? 'Shorter' : 'Longer'} sea routing — ${nf(oceanEntry.distanceKm)} km instead of ${nf(oceanLeg.distanceKm)} km`,
         timesUsedInWorkbook: oceanEntry.count,
         evidence: `The workbook records two different sailing distances for ${oceanEntry.source} → ${oceanEntry.dest}: `
           + `${nf(oceanEntry.distanceKm)} km on ${oceanEntry.count} shipment${oceanEntry.count === 1 ? '' : 's'}, against `
@@ -782,6 +818,7 @@ function buildOptions(s) {
       ? { ...l, co2eTonnes: r6(l.co2eTonnes * share), fuelLitres: Math.round((l.fuelLitres ?? 0) * share) }
       : { ...l }));
     add(finishOption('consolidate', legs, s.gateway, current, {
+      detail: `Share one truck with the ${group.length - 1} other same-day ${s.gateway} load${group.length === 2 ? '' : 's'}`,
       timesUsedInWorkbook: group.length,
       evidence: `${group.length} shipments leave through ${s.gateway} on ${s.date} and together weigh `
         + `${groupWeight.toFixed(2)} t, which fits the ${MAX_TRUCK_TONNES.toFixed(2)} t heaviest single load the workbook `
@@ -1318,6 +1355,96 @@ const filterOptions = {
   workbookReportingYears: src.years.map((y) => y.reportingYear),
 };
 
+// ══════════════════════════════════════════════════════════════════════════
+// 8b. The workbook itself, addressable by cell range
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Every figure in the application already carries the cell range it came from.
+// This makes that reference resolvable: the app can look up "2022-2024!AM4:AX4"
+// and show the row exactly as the spreadsheet holds it — the same quantity,
+// distance, factor and CO₂e, in the sheet's own column headings.
+//
+// It is a supporting capability, not a feature anyone navigates to. The point is
+// that no number in the product is a dead end: a reader who does not believe a
+// total can open it, and keep opening it, until they are looking at a cell.
+const workbookRows = {};
+const addWorkbookRow = (row, block, mode) => {
+  if (!row?.sourceRef || workbookRows[row.sourceRef]) return;
+  const [tab, range] = row.sourceRef.split('!');
+  workbookRows[row.sourceRef] = {
+    ref: row.sourceRef,
+    tab,
+    range,
+    block,
+    mode,
+    reportingYear: TABS_BY_NAME[tab],
+    date: row.date,
+    item: row.item,
+    qtyKg: row.qtyKg,
+    source: row.source,
+    dest: row.dest,
+    distanceKm: row.distanceKm,
+    distanceNm: row.distanceNm ?? null,
+    emissionFactor: row.ef,
+    efUnit: EF_UNIT[mode],
+    efBasis: EF_BASIS[mode],
+    /** CO₂e exactly as the workbook prints it — never a recomputation. */
+    co2eTonnes: row.co2e,
+    fuelKl: row.fuelKl ?? null,
+    fuelType: row.fuelType ?? null,
+    trips: row.trips ?? null,
+    container: row.container ?? null,
+    distPerTripKm: row.distPerTripKm ?? null,
+    slNo: row.sl ?? null,
+  };
+};
+
+for (const year of src.years) {
+  for (const sh of year.exportShipments) {
+    for (const l of sh.inland) addWorkbookRow(l, 'inland', modeOfInlandRow(l));
+    addWorkbookRow(sh.ocean, 'waterway', 'ocean');
+  }
+  for (const sh of year.airShipments) {
+    for (const l of sh.inland) addWorkbookRow(l, 'inland', modeOfInlandRow(l));
+    addWorkbookRow(sh.air, 'airway', 'air');
+  }
+  for (const r of year.collectionMovements) addWorkbookRow(r, 'collection', 'road');
+  for (const r of year.exportFirstMileFromCollectionBlock ?? []) addWorkbookRow(r, 'collection', 'road');
+  // Rows the extractor flagged are not attached to any shipment, so they would
+  // otherwise be unreachable — and the data-quality finding that names them
+  // would open onto nothing.
+  for (const f of year.dataFlags ?? []) {
+    if (f.row) addWorkbookRow(f.row, f.kind === 'conflicting-distance' ? 'collection' : 'inland', modeOfInlandRow(f.row));
+  }
+}
+
+const workbook = {
+  file: src.source.workbook,
+  title: src.source.title,
+  dataSourceNotes: src.source.dataSourceNotes,
+  tabs: src.years.map((y) => {
+    const refs = Object.values(workbookRows).filter((r) => r.tab === y.tab);
+    const dates = refs.map((r) => r.date).filter(Boolean).sort();
+    return {
+      tab: y.tab,
+      reportingYear: y.reportingYear,
+      from: dates[0] ?? null,
+      to: dates.at(-1) ?? null,
+      rows: refs.length,
+      printedTotalCo2eTonnes: y.reportedTotalCo2eTonnes,
+      printedTotalCell: 'D53',
+      /** The tab's own layout, so the viewer can say which block a row sits in. */
+      blocks: [
+        { key: 'collection', label: 'ROADWAY #1 — first-mile collection', columns: 'A:L' },
+        { key: 'inland', label: 'ROADWAY #2 / RAILWAY — export inland legs', columns: 'N:AK' },
+        { key: 'waterway', label: 'WATERWAY — ocean leg', columns: 'AM:AW' },
+        { key: 'airway', label: 'AIRWAY — air freight', columns: 'AY:BG' },
+      ],
+    };
+  }),
+  rows: workbookRows,
+};
+
 const copilotSuggestions = [
   { id: 'CS-1', prompt: 'What should I change on the shipments still to be planned?' },
   { id: 'CS-2', prompt: 'Where is our transport CO₂e concentrated?' },
@@ -1368,6 +1495,7 @@ write('evidence.json', evidence);
 write('filter-options.json', filterOptions);
 write('geo.json', GEO);
 write('copilot-suggestions.json', copilotSuggestions);
+write('workbook.json', workbook);
 
 // ── Report ─────────────────────────────────────────────────────────────────
 const plannedRecs = recommendations.filter((r) => r.shipmentId?.startsWith('PLN'));

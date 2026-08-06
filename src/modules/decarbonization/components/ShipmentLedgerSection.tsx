@@ -261,6 +261,7 @@ export function ShipmentLedgerSection({
       <ChartContainer
         fill={compact}
         title="Shipment register"
+        guideKey="shipment-register"
         insights={rows.length ? insightsForRegister(rows) : undefined}
         isEmpty={status !== 'loading' && Boolean(result) && rows.length === 0}
         emptyMessage="No movements match this period and filter set. Widen the date range or clear a filter."

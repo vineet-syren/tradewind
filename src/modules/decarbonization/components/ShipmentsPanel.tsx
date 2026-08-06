@@ -3,6 +3,8 @@ import { Box, Card, CardContent, Chip, MenuItem, Stack, Tab, Tabs, TextField, Ty
 import { alpha } from '@mui/material/styles';
 import ArrowForwardRounded from '@mui/icons-material/ArrowForwardRounded';
 import { ChartContainer } from '@/components/charts/ChartContainer';
+import { MetricHelp } from '@/components/charts/MetricHelp';
+import { METRIC_GUIDE } from '@/constants/metricGuide';
 import { OptionCompareChart } from '@/components/charts/OptionCompareChart';
 import { WorldMap } from '@/components/map/WorldMap';
 import { SplitPane } from '@/components/layout/SplitPane';
@@ -129,6 +131,7 @@ export function ShipmentsPanel() {
       <Box ref={mapRef}>
         <ChartContainer
           title="Outbound shipment network"
+          guideKey="network-map"
           subtitle={
             activeLaneId
               ? 'The optimised route and every option it was chosen from — hover a leg for its distance, factor and source cell'
@@ -270,7 +273,7 @@ function ShipmentRoutePanel({ shipmentId, onOpenLane }: { shipmentId: string; on
   const note = best
     ? isPast
       ? `This shipment has already moved, so the routing decision is history — but the optimised route below is one the workbook itself ran, and it would have saved ${formatTonnes(s.avoidableTonnes)} (${Math.round(s.avoidablePct)}%). Every option is priced on this shipment's own weight and distances.`
-      : `Still to be planned. The optimised route below saves ${formatTonnes(s.avoidableTonnes)} (${Math.round(s.avoidablePct)}%) against the route as booked today. Compare CO₂e, transit, distance and fuel — booking happens in your own systems.`
+      : `Still to be planned — nothing here is booked yet. The optimised route below saves ${formatTonnes(s.avoidableTonnes)} (${Math.round(s.avoidablePct)}%) against the way this lane usually runs. Compare CO₂e, transit, distance and fuel; booking happens in your own systems.`
     : alts > 0
       ? `Already the optimised route. ${alts} other routing${alts === 1 ? '' : 's'} the workbook records ${alts === 1 ? 'was' : 'were'} priced on this shipment's own weight and distances, and ${alts === 1 ? 'it costs' : 'all cost'} more.`
       : 'The workbook records no other routing that reaches this destination, so there is nothing to compare against. Options are never invented.';
@@ -357,14 +360,17 @@ function RouteOptions({
                 {subtitle}
               </Typography>
             </Box>
-            <Typography
-              variant="caption"
-              color="primary.main"
-              sx={{ cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap' }}
-              onClick={onOpenLane}
-            >
-              Full lane 360 →
-            </Typography>
+            <Stack direction="row" spacing={0.5} alignItems="center" sx={{ flexShrink: 0 }}>
+              <MetricHelp guide={METRIC_GUIDE['route-options']} />
+              <Typography
+                variant="caption"
+                color="primary.main"
+                sx={{ cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap' }}
+                onClick={onOpenLane}
+              >
+                Full lane 360 →
+              </Typography>
+            </Stack>
           </Stack>
           <Typography variant="caption" sx={{ display: 'block', mt: 1, color: 'text.secondary' }}>
             {note}

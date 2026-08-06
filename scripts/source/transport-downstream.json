@@ -3626,19 +3626,64 @@
      "kind": "conflicting-distance",
      "detail": "First mile for 50 kg Red Pepper Ground- 40K- 50K Shu on 2021-09-17 is recorded as 21 km in the collection block and 645 km in the export road block. The export road block is used.",
      "co2eTonnes": 0.0124488,
-     "sourceRef": "2020-2022!A44:M44"
+     "sourceRef": "2020-2022!A44:M44",
+     "row": {
+      "date": "2021-09-17",
+      "item": "RED PEPPER GROUND- 40K- 50K SHU",
+      "qtyKg": 50.0,
+      "source": "VKS Factory",
+      "dest": "Hyderabad",
+      "distanceKm": 21.0,
+      "ef": 0.5928,
+      "co2e": 0.0124488,
+      "sourceRef": "2020-2022!A44:M44",
+      "distPerTripKm": null,
+      "fuelKl": null,
+      "trips": null,
+      "subBlock": "exportFirstMile"
+     }
     },
     {
      "kind": "conflicting-distance",
      "detail": "First mile for 25 kg Red Pepper Ground35K- 40K Shu (Rfa) on 2021-10-01 is recorded as 21 km in the collection block and 645 km in the export road block. The export road block is used.",
      "co2eTonnes": 0.0124488,
-     "sourceRef": "2020-2022!A48:M48"
+     "sourceRef": "2020-2022!A48:M48",
+     "row": {
+      "date": "2021-10-01",
+      "item": "RED PEPPER GROUND35K- 40K SHU (RFA)",
+      "qtyKg": 25.0,
+      "source": "VKS Factory",
+      "dest": "Hyderabad",
+      "distanceKm": 21.0,
+      "ef": 0.5928,
+      "co2e": 0.0124488,
+      "sourceRef": "2020-2022!A48:M48",
+      "distPerTripKm": null,
+      "fuelKl": null,
+      "trips": null,
+      "subBlock": "exportFirstMile"
+     }
     },
     {
      "kind": "duplicate-inland-leg",
      "detail": "VKS Factory \u2192 Hyderabad (645 km) is listed twice for 25000 kg Red Pepper Ground 35K-40K Shu-Ht Ipm on 2022-05-07; only one movement is counted per shipment.",
      "co2eTonnes": 0.382356,
-     "sourceRef": "2020-2022!N83:Z83"
+     "sourceRef": "2020-2022!N83:Z83",
+     "row": {
+      "date": "2022-05-07",
+      "item": "Red Pepper Ground 35K-40K SHU-HT IPM",
+      "qtyKg": 25000.0,
+      "source": "VKS Factory",
+      "dest": "Hyderabad",
+      "distanceKm": 645.0,
+      "ef": 0.5928,
+      "co2e": 0.382356,
+      "sourceRef": "2020-2022!N83:Z83",
+      "fuelKl": null,
+      "trips": null,
+      "fuelType": "Diesel",
+      "sl": 79.0
+     }
     }
    ],
    "collectionMovements": [

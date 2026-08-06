@@ -600,6 +600,60 @@ group('12. Reference data and exceptions');
 }
 
 // ══════════════════════════════════════════════════════════════════════════
+group('12b. Referenceability — every cell reference in the app resolves');
+// ══════════════════════════════════════════════════════════════════════════
+{
+  // The product's central claim is that any figure can be opened until you are
+  // looking at a spreadsheet cell. A reference that resolves to nothing breaks
+  // that chain silently — the user clicks and gets an empty dialog — so every
+  // ref the UI can surface is checked against the addressable workbook.
+  const wb = read('workbook.json');
+  const known = new Set(Object.keys(wb.rows));
+  const used = new Map(); // ref -> where it came from
+
+  const note = (ref, where) => ref && !used.has(ref) && used.set(ref, where);
+  for (const s of details) {
+    note(s.sourceRef, `${s.shipmentId}.sourceRef`);
+    note(s.derivedFromRef, `${s.shipmentId}.derivedFromRef`);
+    for (const l of s.legs) note(l.sourceRef, `${s.shipmentId} leg ${l.seq}`);
+    for (const o of s.options) {
+      for (const r of o.evidenceRefs ?? []) note(r, `${s.shipmentId}/${o.id} evidence`);
+      for (const l of o.legs) note(l.sourceRef, `${s.shipmentId}/${o.id} leg`);
+    }
+  }
+  for (const r of recommendations) for (const ref of r.proofRefs ?? []) note(ref, `${r.id} proof`);
+  for (const e of exceptions) note(e.sourceRef, `${e.id}`);
+  for (const f of factors) note(f.sourceRef, `factor ${f.mode}`);
+  for (const lane of laneDetails) {
+    for (const o of lane.options ?? []) for (const r of o.evidenceRefs ?? []) note(r, `${lane.laneId}/${o.id}`);
+  }
+
+  const dangling = [...used.entries()].filter(([ref]) => !known.has(ref));
+  ok(
+    `all ${used.size} distinct cell references resolve to a workbook row`,
+    dangling.length === 0,
+    `${dangling.length} dangling, e.g. ${dangling.slice(0, 3).map(([r, w]) => `${r} (${w})`).join('; ')}`,
+  );
+
+  // And the rows themselves must agree with what the app says they hold.
+  const mismatched = [];
+  for (const s of details.filter((d) => d.dataOrigin === 'workbook')) {
+    for (const leg of s.legs) {
+      const row = wb.rows[leg.sourceRef];
+      if (!row) continue;
+      if (Math.abs((row.co2eTonnes ?? 0) - leg.co2eTonnes) > 1e-6) mismatched.push(`${s.shipmentId} leg ${leg.seq} co2e`);
+      if (Math.abs((row.distanceKm ?? 0) - leg.distanceKm) > 1e-3) mismatched.push(`${s.shipmentId} leg ${leg.seq} distance`);
+      if (row.emissionFactor !== leg.emissionFactor) mismatched.push(`${s.shipmentId} leg ${leg.seq} factor`);
+    }
+  }
+  ok('every referenced row matches the leg that cites it', mismatched.length === 0, mismatched.slice(0, 4).join(' | '));
+  ok('the addressable workbook covers every tab', wb.tabs.length === src.years.length, `${wb.tabs.length} vs ${src.years.length}`);
+  if (!dangling.length && !mismatched.length) {
+    pass(`${used.size} references → ${known.size} addressable rows`, '— every figure opens onto a cell');
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
 group('13. Geography — every place on the map is a workbook place');
 // ══════════════════════════════════════════════════════════════════════════
 {

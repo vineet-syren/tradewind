@@ -14,15 +14,18 @@ export function BarList({
   valueFormatter,
   color = '#10b981',
   onSelect,
+  maxHeight,
 }: {
   items: BarListItem[];
   valueFormatter: (v: number) => string;
   color?: string;
   onSelect?: (item: BarListItem) => void;
+  /** Cap the list and scroll inside it — see the note on `IntensityRanking`. */
+  maxHeight?: number;
 }) {
   const max = Math.max(...items.map((i) => i.value), 0.0001);
   return (
-    <Stack spacing={1.25}>
+    <Stack spacing={1.25} sx={maxHeight ? { maxHeight, overflowY: 'auto', pr: 0.75 } : undefined}>
       {items.map((item) => {
         const c = item.color ?? color;
         return (

@@ -4,6 +4,9 @@ import { alpha, useTheme } from '@mui/material/styles';
 import AutoAwesomeRoundedIcon from '@mui/icons-material/AutoAwesomeRounded';
 import InboxRoundedIcon from '@mui/icons-material/InboxRounded';
 import type { ReactNode } from 'react';
+import { MetricHelp } from './MetricHelp';
+import { METRIC_GUIDE } from '@/constants/metricGuide';
+import type { Derivation } from '@/utils/derivations';
 
 /** Render `**bold**` segments in insight strings as highlighted text. */
 function richText(text: string): ReactNode {
@@ -23,6 +26,8 @@ export function ChartContainer({
   fill = false,
   isEmpty = false,
   emptyMessage = 'Nothing matches the current filters. Clear one and this comes back.',
+  guideKey,
+  derivation,
 }: {
   title?: string;
   subtitle?: string;
@@ -41,6 +46,13 @@ export function ChartContainer({
   isEmpty?: boolean;
   emptyMessage?: string;
   /**
+   * Key into `METRIC_GUIDE` — renders the "?" beside Insights, explaining what
+   * the chart means, how it is calculated and a worked example.
+   */
+  guideKey?: string;
+  /** Live arithmetic behind this chart's figures, from the rows in view. */
+  derivation?: Derivation;
+  /**
    * Give the body whatever height is left in a parent of definite height, so a
    * scrollable child (a long table) fills the card instead of the card growing
    * to fit it. Needs an ancestor that actually has a height to give.
@@ -50,11 +62,16 @@ export function ChartContainer({
   const theme = useTheme();
   const [showInsights, setShowInsights] = useState(false);
   const hasInsights = Boolean(insights && insights.length > 0);
+  const guide = guideKey ? METRIC_GUIDE[guideKey] : undefined;
 
   return (
-    <Card sx={{ height: '100%', ...(fill && { display: 'flex', flexDirection: 'column', minHeight: 0 }) }}>
-      <CardContent sx={fill ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } : undefined}>
-        {(title || action || hasInsights) && (
+    // A card in a grid row stretches to the tallest card in that row. When this
+    // one's chart is shorter, the body grows and centres it rather than leaving
+    // the chart pinned to the top of the extra space — cheap insurance against
+    // the dead-space problem reappearing on some future pairing.
+    <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', ...(fill && { minHeight: 0 }) }}>
+      <CardContent sx={{ flex: 1, display: 'flex', flexDirection: 'column', ...(fill && { minHeight: 0 }) }}>
+        {(title || action || hasInsights || guide) && (
           <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1} sx={{ mb: 1.5 }}>
             <Stack direction="row" spacing={1.25} alignItems="flex-start">
               {icon && (
@@ -88,6 +105,7 @@ export function ChartContainer({
               </Box>
             </Stack>
             <Stack direction="row" spacing={1} alignItems="center" sx={{ flexShrink: 0 }}>
+              {guide && <MetricHelp guide={guide} derivation={derivation} />}
               {hasInsights && (
                 <Chip
                   size="small"
@@ -149,7 +167,19 @@ export function ChartContainer({
             </Typography>
           </Stack>
         ) : (
-          <Box sx={{ height, ...(fill && { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }) }}>{children}</Box>
+          <Box
+            sx={{
+              height,
+              flex: 1,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              ...(fill ? {} : { justifyContent: 'center' }),
+              '& > *': { minWidth: 0 },
+            }}
+          >
+            {children}
+          </Box>
         )}
       </CardContent>
     </Card>

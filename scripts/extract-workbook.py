@@ -341,6 +341,11 @@ def main() -> None:
                               f"The export road block is used.",
                     "co2eTonnes": r["co2e"],
                     "sourceRef": r["sourceRef"],
+                    # The row itself travels with the flag. A flagged row is not
+                    # attached to any shipment, so this is the only place it
+                    # survives — and the app must still be able to open the cell
+                    # it names, or the finding points at nothing.
+                    "row": r,
                 })
 
         # Whatever is still unattached is a duplicated row in the workbook, not
@@ -354,6 +359,9 @@ def main() -> None:
                                   f"{k[2]:g} kg {k[1].title()} on {k[0]}; only one movement is counted per shipment.",
                         "co2eTonnes": leg["co2e"],
                         "sourceRef": leg["sourceRef"],
+                        # See the note on conflicting-distance: an unattached row
+                        # would otherwise be unopenable from the finding about it.
+                        "row": leg,
                     })
 
         years.append({

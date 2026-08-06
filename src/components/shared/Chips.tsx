@@ -1,4 +1,5 @@
-import { Box, Chip, Stack, Typography } from '@mui/material';
+import { useState } from 'react';
+import { Box, Chip, Stack, Tooltip, Typography } from '@mui/material';
 import type { ChipProps } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import TrendingDownRoundedIcon from '@mui/icons-material/TrendingDownRounded';
@@ -6,6 +7,7 @@ import { MODE_COLORS, OPTION_COLORS, STATUS_LABEL } from '@/constants/app';
 import { ModeIcon } from '@/components/layout/iconRegistry';
 import type { Severity } from '@/types';
 import { formatTonnes } from '@/utils/format';
+import { WorkbookRefDialog } from './WorkbookRefDialog';
 
 const SEVERITY_COLOR: Record<Severity, 'error' | 'warning' | 'success'> = {
   High: 'error',
@@ -108,24 +110,51 @@ export function ModeLegend() {
 /**
  * A workbook cell reference, e.g. "2022-2024!AM12:AX12". Shown wherever a number
  * needs to be checkable at source — the whole point of the app is that it can be.
+ *
+ * Clicking resolves the range and shows the row as the spreadsheet holds it.
+ * Every one of these in the product is a live link to a cell, which is what
+ * makes "traceable" a property of the software rather than a claim about it.
  */
 export function SourceRef({ refs, label = 'Workbook' }: { refs: string[]; label?: string }) {
-  const shown = refs.filter(Boolean).slice(0, 3);
+  const [open, setOpen] = useState<string[] | null>(null);
+  const all = refs.filter(Boolean);
+  const shown = all.slice(0, 3);
   if (!shown.length) return null;
   return (
-    <Typography
-      variant="caption"
-      sx={{
-        display: 'block',
-        color: 'text.disabled',
-        fontFamily: 'monospace',
-        fontSize: 10.5,
-        mt: 0.5,
-        wordBreak: 'break-all',
-      }}
-    >
-      {label}: {shown.join(' · ')}
-      {refs.length > shown.length ? ` +${refs.length - shown.length} more` : ''}
-    </Typography>
+    <>
+      <Tooltip title="Open these rows in the source workbook">
+        <Typography
+          component="button"
+          type="button"
+          variant="caption"
+          onClick={(e) => {
+            e.stopPropagation();
+            setOpen(all);
+          }}
+          sx={{
+            display: 'block',
+            width: '100%',
+            textAlign: 'left',
+            border: 0,
+            p: 0,
+            bgcolor: 'transparent',
+            cursor: 'pointer',
+            color: 'text.disabled',
+            fontFamily: 'monospace',
+            fontSize: 10.5,
+            mt: 0.5,
+            wordBreak: 'break-all',
+            textDecorationLine: 'underline',
+            textDecorationStyle: 'dotted',
+            textUnderlineOffset: '2px',
+            '&:hover': { color: 'primary.main' },
+          }}
+        >
+          {label}: {shown.join(' · ')}
+          {all.length > shown.length ? ` +${all.length - shown.length} more` : ''}
+        </Typography>
+      </Tooltip>
+      <WorkbookRefDialog refs={open} onClose={() => setOpen(null)} />
+    </>
   );
 }

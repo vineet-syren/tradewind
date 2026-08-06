@@ -31,6 +31,7 @@ import type {
   ShipmentDetail,
   ShipmentFilters,
   ShipmentQuery,
+  WorkbookIndex,
 } from '@/types';
 import { AGENT_CATALOG } from '@/constants/agents';
 import { getPersona } from '@/constants/personas';
@@ -96,6 +97,8 @@ export class MockDataSource implements CarbonDataSource {
   private loadGeo = once(() => fetchJson<GeoDictionary>('geo.json'));
   private loadEmissionFactors = once(() => fetchJson<EmissionFactorRow[]>('emission-factors.json'));
   private loadCopilotSuggestions = once(() => fetchJson<CopilotSuggestion[]>('copilot-suggestions.json'));
+  // 360 KB of source rows — only fetched when someone actually opens a cell.
+  private loadWorkbook = once(() => fetchJson<WorkbookIndex>('workbook.json'));
 
   private async scopedShipments(params?: ScopeParams): Promise<Shipment[]> {
     return scopeAndFilter(await this.loadShipments(), params?.persona, params?.filters);
@@ -167,6 +170,10 @@ export class MockDataSource implements CarbonDataSource {
   async getEvidence(): Promise<EsgEvidence> {
     await delay('normal');
     return this.loadEvidence();
+  }
+  async getWorkbook(): Promise<WorkbookIndex> {
+    await delay('fast');
+    return this.loadWorkbook();
   }
   async getExceptions(params?: ScopeParams): Promise<ExceptionItem[]> {
     await delay('normal');

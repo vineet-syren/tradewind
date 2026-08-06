@@ -1,11 +1,12 @@
 import { Bar, BarChart, Cell, LabelList, ResponsiveContainer, XAxis, YAxis, Tooltip } from 'recharts';
 import { useTheme } from '@mui/material/styles';
+import { Box, Typography } from '@mui/material';
 import type { RouteOption } from '@/types';
 import { OPTION_COLORS } from '@/constants/app';
 import { formatTonnes } from '@/utils/format';
 
 /**
- * CO₂e side by side across a shipment's route options, "as booked today" first.
+ * CO₂e side by side across a shipment's route options, the booked one first.
  *
  * An air option can be two orders of magnitude above the rest, so the axis is
  * capped at twice the tallest non-outlier bar and any bar beyond it is labelled
@@ -33,8 +34,14 @@ export function OptionCompareChart({
   const rows = sorted.map((o) => ({
     id: o.id,
     label: o.label,
+    detail: o.detail,
+    tagline: o.tagline,
     kind: o.kind,
     value: o.co2eTonnes,
+    delta: o.isCurrent ? null : o.co2eDeltaTonnes,
+    transit: o.transitDaysEst,
+    transitDelta: o.isCurrent ? null : o.transitDeltaDays,
+    proven: o.timesUsedInWorkbook,
     display: Math.min(o.co2eTonnes, cap),
     capped: o.co2eTonnes > cap,
   }));
@@ -50,12 +57,43 @@ export function OptionCompareChart({
           domain={[0, cap]}
           tickFormatter={(v: number) => formatTonnes(v)}
         />
+        {/* The axis labels name the kind of option; the specifics of what each
+            one does live here, where they do not have to fit under a bar. */}
         <Tooltip
-          formatter={(_v: number, _n, item) => {
-            const row = item?.payload as (typeof rows)[number] | undefined;
-            return [formatTonnes(row?.value ?? 0), 'CO₂e'];
+          cursor={{ fill: theme.palette.action.hover }}
+          content={({ active, payload }) => {
+            if (!active || !payload?.length) return null;
+            const row = payload[0].payload as (typeof rows)[number];
+            return (
+              <Box sx={{ bgcolor: 'background.paper', border: 1, borderColor: 'divider', borderRadius: 1.5, p: 1.25, boxShadow: 3, maxWidth: 280 }}>
+                <Typography variant="caption" sx={{ fontWeight: 800, display: 'block', color: OPTION_COLORS[row.kind] }}>
+                  {row.label}
+                </Typography>
+                <Typography variant="caption" sx={{ fontWeight: 600, display: 'block' }}>
+                  {row.detail}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                  {row.tagline}
+                </Typography>
+                <Typography variant="caption" sx={{ display: 'block', mt: 0.75, fontWeight: 700 }}>
+                  {formatTonnes(row.value)} CO₂e
+                  {row.delta != null && (
+                    <Box component="span" sx={{ color: row.delta < 0 ? 'success.main' : 'error.main', ml: 0.5 }}>
+                      ({row.delta < 0 ? '−' : '+'}
+                      {formatTonnes(Math.abs(row.delta))})
+                    </Box>
+                  )}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                  ~{row.transit} days transit
+                  {row.transitDelta != null && row.transitDelta !== 0
+                    ? ` (${row.transitDelta > 0 ? '+' : '−'}${Math.abs(row.transitDelta)})`
+                    : ''}
+                  {row.delta != null ? ` · used on ${row.proven} shipment${row.proven === 1 ? '' : 's'}` : ''}
+                </Typography>
+              </Box>
+            );
           }}
-          contentStyle={{ borderRadius: 10, fontSize: 12 }}
         />
         <Bar
           dataKey="display"

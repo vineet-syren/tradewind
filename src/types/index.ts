@@ -14,3 +14,4 @@ export * from './filters';
 export * from './copilot';
 export * from './assumptions';
 export * from './agent';
+export * from './workbook';

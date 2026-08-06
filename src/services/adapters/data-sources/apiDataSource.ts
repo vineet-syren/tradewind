@@ -12,6 +12,7 @@ import type {
   CopilotSuggestion,
   EmissionFactorRow,
   EsgEvidence,
+  WorkbookIndex,
   ExceptionItem,
   FilterOptions,
   Footprint,
@@ -98,6 +99,9 @@ export class ApiDataSource implements CarbonDataSource {
   }
   getHotspots(params?: ScopeParams): Promise<Hotspots> {
     return this.get('/hotspots', params as Record<string, unknown>);
+  }
+  getWorkbook(): Promise<WorkbookIndex> {
+    return this.get<WorkbookIndex>('/workbook');
   }
   getEvidence(): Promise<EsgEvidence> {
     return this.get('/evidence');

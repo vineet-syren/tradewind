@@ -20,6 +20,9 @@ import RouteRounded from '@mui/icons-material/RouteRounded';
 import StraightenRounded from '@mui/icons-material/StraightenRounded';
 import type { Intent, KpiMetric } from '@/types';
 import { formatMetric } from '@/utils/format';
+import { MetricHelp } from '@/components/charts/MetricHelp';
+import { KPI_GUIDE } from '@/constants/metricGuide';
+import type { Derivation } from '@/utils/derivations';
 
 /** Semantic icon keys → glyphs, so pages can label a KPI with a short string. */
 const ICONS: Record<string, SvgIconComponent> = {
@@ -53,10 +56,13 @@ function intentColor(theme: Theme, intent: Intent): { main: string; soft: string
 }
 
 /** A single KPI tile — icon chip, headline value, and a trend pill or hint. */
-export function KpiCard({ metric }: { metric: KpiMetric }) {
+export function KpiCard({ metric, derivation }: { metric: KpiMetric; derivation?: Derivation }) {
   const theme = useTheme();
   const c = intentColor(theme, metric.intent);
   const Icon = ICONS[metric.icon ?? ''] ?? InsightsRounded;
+  // Tiles are keyed by their own id, so a page gets the explainer for free
+  // wherever the metric already carries a known id.
+  const guide = KPI_GUIDE[metric.id];
 
   const hasDelta = metric.deltaPct != null;
   const up = (metric.deltaPct ?? 0) >= 0;
@@ -67,13 +73,20 @@ export function KpiCard({ metric }: { metric: KpiMetric }) {
   return (
     <Card sx={{ position: 'relative', height: '100%', overflow: 'hidden', borderLeft: `4px solid ${c.main}` }}>
       <CardContent sx={{ py: 2, '&:last-child': { pb: 2 } }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+        <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={0.5}>
           <Typography
             variant="caption"
             sx={{ color: 'text.secondary', letterSpacing: '0.08em', textTransform: 'uppercase', fontSize: 10, pt: 0.25 }}
           >
             {metric.label}
           </Typography>
+          {/* The "?" sits next to the tile's own icon, so the explanation for a
+              headline number is reachable from the number itself. */}
+          {guide && (
+            <Box sx={{ ml: 'auto', mt: -0.25 }}>
+              <MetricHelp guide={guide} size="tiny" derivation={derivation} />
+            </Box>
+          )}
           <Box
             sx={{
               flexShrink: 0,

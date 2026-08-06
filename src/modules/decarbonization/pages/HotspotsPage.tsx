@@ -33,6 +33,25 @@ import {
   insightsForSeasonality,
 } from '@/utils/insights';
 import { formatTonnes } from '@/utils/format';
+import { deriveAvoidable, deriveIntensity, deriveRanking, deriveRoadLegs, deriveTotalCo2e, deriveYears } from '@/utils/derivations';
+import type { Shipment } from '@/types';
+
+/** Which live derivation belongs to which KPI tile. */
+function kpiDerivation(id: string, rows: Shipment[]) {
+  if (!rows.length) return undefined;
+  switch (id) {
+    case 'total':
+      return deriveTotalCo2e(rows);
+    case 'avoidable':
+      return deriveAvoidable(rows);
+    case 'road':
+      return deriveRoadLegs(rows);
+    case 'intensity':
+      return deriveIntensity(rows);
+    default:
+      return undefined;
+  }
+}
 
 const DIMENSIONS: { key: HotspotDimension; label: string; noun: string }[] = [
   { key: 'byCategory', label: 'Product category', noun: 'product category' },
@@ -63,6 +82,12 @@ export default function HotspotsPage() {
   const { data: hotspots, status } = useAsync(() => ds.getHotspots({ persona, filters }), [persona, filters]);
   const { data: footprint } = useAsync(() => ds.getFootprint({ persona, filters }), [persona, filters]);
   const { data: evidence } = useAsync(() => ds.getEvidence(), []);
+  // The rows behind the KPI tiles, so each "?" can show the arithmetic that
+  // produced its own number rather than only a fixed teaching example.
+  const { data: scopedRows } = useAsync(
+    () => ds.getShipments({ persona, ...filters, pageSize: 5000 }).then((r) => r.items),
+    [persona, filters],
+  );
   const [dimension, setDimension] = useState<HotspotDimension>('byCategory');
   const [yearFocus, setYearFocus] = useState<string | null>(null);
 
@@ -134,7 +159,7 @@ export default function HotspotsPage() {
       {kpis.length > 0 && (
         <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(4, 1fr)' }, mb: 3 }}>
           {kpis.map((k) => (
-            <KpiCard key={k.id} metric={k} />
+            <KpiCard key={k.id} metric={k} derivation={kpiDerivation(k.id, scopedRows ?? [])} />
           ))}
         </Box>
       )}
@@ -155,9 +180,11 @@ export default function HotspotsPage() {
           <Box sx={{ display: 'grid', gap: 3, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' } }}>
             <ChartContainer
               title="Year over year"
+              guideKey="year-over-year"
               subtitle="Bars are total CO₂e, the line is intensity — click a year to drill into its months"
               icon={<ShowChartRounded sx={{ fontSize: 18 }} />}
               insights={footprint ? insightsForReportingYears(footprint.byReportingYear) : undefined}
+              derivation={footprint ? deriveYears(footprint.byReportingYear) : undefined}
               isEmpty={Boolean(footprint && footprint.byReportingYear.length === 0)}
               emptyMessage="No reporting year falls inside the current filters. Widen the date range and the yearly trend comes back."
             >
@@ -177,6 +204,7 @@ export default function HotspotsPage() {
 
             <ChartContainer
               title={yearFocus ? `Month by month · ${yearFocus}` : 'Month by month'}
+              guideKey="month-by-month"
               subtitle={
                 yearFocus
                   ? 'Click the same year bar again to show every month'
@@ -204,9 +232,11 @@ export default function HotspotsPage() {
               which is the page built around composition. */}
           <ChartContainer
             title={`CO₂e by ${dim.noun}`}
+            guideKey="hotspot-ranking"
             subtitle="Ranked highest first · switch the dimension to re-slice the same emissions"
             icon={<LayersRounded sx={{ fontSize: 18 }} />}
             insights={insightsForHotspots(rows, dim.noun)}
+            derivation={deriveRanking(rows, dim.noun)}
             action={
               <TextField
                 select
@@ -230,16 +260,20 @@ export default function HotspotsPage() {
           <Box sx={{ display: 'grid', gap: 3, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' } }}>
             <ChartContainer
               title="CO₂e by transport mode"
+              guideKey="mode-split"
               subtitle="Which mode carries the footprint"
               insights={footprint ? insightsForModeSplit(footprint.modeSplit) : undefined}
+              derivation={footprint ? deriveRanking(footprint.modeSplit.map((m) => ({ label: `${m.mode}-led movements`, co2eTonnes: m.co2eTonnes, shipments: m.shipments })), 'transport mode') : undefined}
             >
               {footprint ? <ModeSplitDonut data={footprint.modeSplit} /> : <ChartSkeleton height={260} />}
             </ChartContainer>
 
             <ChartContainer
               title="Least efficient per tonne moved"
+              guideKey="intensity-ranking"
               subtitle={`g CO₂e per tonne-kilometre by ${dim.noun}`}
               insights={insightsForHotspots(rows, dim.noun)}
+              derivation={deriveRanking(rows, dim.noun)}
             >
               <IntensityRanking items={toIntensity(rows)} avg={footprint?.avgIntensity} />
             </ChartContainer>
@@ -252,6 +286,7 @@ export default function HotspotsPage() {
               Product & Destination Lanes, which shows the mix as well as the total. */}
           <ChartContainer
             title="Monthly CO₂e by mode"
+            guideKey="mode-trend"
             subtitle="Where the seasonal peaks fall, and which mode drives them · drag the brush to zoom"
             icon={<ShowChartRounded sx={{ fontSize: 18 }} />}
             insights={[...insightsForMonthlyByMode(hotspots.monthlyByMode), ...insightsForSeasonality(hotspots.monthlyByMode)]}
@@ -262,6 +297,7 @@ export default function HotspotsPage() {
 
           <ChartContainer
             title="Gateway → mode → region"
+            guideKey="flows-sankey"
             subtitle="How the CO₂e flows out of India and where it ends up"
             icon={<AccountTreeRounded sx={{ fontSize: 18 }} />}
             insights={insightsForFlows(hotspots.flows)}
@@ -276,8 +312,10 @@ export default function HotspotsPage() {
           {collection.length > 0 && (
             <ChartContainer
               title="First-mile collection"
+              guideKey="collection"
               subtitle="Road runs bringing raw chilli in from the growing regions — part of the reported total, separate from the export chain"
               insights={insightsForHotspots(collection, 'growing region')}
+              derivation={deriveRanking(collection, 'growing region')}
             >
               <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' } }}>
                 <BarList items={toBars(collection)} valueFormatter={formatTonnes} color="#f59e0b" />

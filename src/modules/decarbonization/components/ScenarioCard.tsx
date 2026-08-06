@@ -61,6 +61,11 @@ export function ScenarioCard({
             <Typography variant="subtitle2" sx={{ color, fontWeight: 800, lineHeight: 1.25 }}>
               {option.label}
             </Typography>
+            {/* The specific finding under the general label — what this option
+                actually does, as opposed to what kind of option it is. */}
+            <Typography variant="caption" sx={{ display: 'block', lineHeight: 1.35, fontWeight: 600 }}>
+              {option.detail}
+            </Typography>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.3 }}>
               {option.tagline}
             </Typography>
@@ -87,7 +92,9 @@ export function ScenarioCard({
             {option.isCurrent && (taken || !option.isOptimised) && (
               <Chip
                 size="small"
-                label={taken ? 'Route taken' : 'Today'}
+                // "Today" was wrong on the forward book — nothing there has been
+                // booked, so there is no current routing, only a usual one.
+                label={taken ? 'Route taken' : 'Baseline'}
                 sx={{ bgcolor: alpha('#5C6B72', 0.16), fontWeight: 700 }}
               />
             )}
