@@ -72,8 +72,22 @@ export function ChartContainer({
     <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', ...(fill && { minHeight: 0 }) }}>
       <CardContent sx={{ flex: 1, display: 'flex', flexDirection: 'column', ...(fill && { minHeight: 0 }) }}>
         {(title || action || hasInsights || guide) && (
-          <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1} sx={{ mb: 1.5 }}>
-            <Stack direction="row" spacing={1.25} alignItems="flex-start">
+          // Wraps rather than compressing. In a narrow pane the title, the "?",
+          // the Insights chip and two select boxes cannot sit on one line, and
+          // an unwrapped row crushed the heading to one word per line inside a
+          // 350px-tall header. Letting the controls drop below is the only
+          // arrangement that stays readable at every pane width.
+          <Stack
+            direction="row"
+            justifyContent="space-between"
+            alignItems="flex-start"
+            spacing={1}
+            rowGap={1}
+            flexWrap="wrap"
+            useFlexGap
+            sx={{ mb: 1.5 }}
+          >
+            <Stack direction="row" spacing={1.25} alignItems="flex-start" sx={{ flex: '1 1 240px', minWidth: 0 }}>
               {icon && (
                 <Box
                   sx={{
@@ -91,7 +105,7 @@ export function ChartContainer({
                   {icon}
                 </Box>
               )}
-              <Box>
+              <Box sx={{ minWidth: 0 }}>
                 {title && (
                   <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
                     {title}
@@ -104,7 +118,7 @@ export function ChartContainer({
                 )}
               </Box>
             </Stack>
-            <Stack direction="row" spacing={1} alignItems="center" sx={{ flexShrink: 0 }}>
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" rowGap={1} useFlexGap sx={{ flexShrink: 0, ml: 'auto' }}>
               {guide && <MetricHelp guide={guide} derivation={derivation} />}
               {hasInsights && (
                 <Chip

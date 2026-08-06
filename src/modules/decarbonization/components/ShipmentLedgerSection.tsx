@@ -94,10 +94,15 @@ export function ShipmentLedgerSection({
     return { co2e, weight, avoidable, intensity: tonneKm ? (co2e * 1e6) / tonneKm : 0, byStatus };
   }, [rows]);
 
-  const period =
-    filters.dateFrom || filters.dateTo
-      ? `${filters.dateFrom ? formatDate(filters.dateFrom) : 'start'} – ${filters.dateTo ? formatDate(filters.dateTo) : 'today'}`
-      : 'Whole workbook · shipped + still to be planned';
+  // An open-ended range needs a phrase, not a placeholder: "start – Jul 31, 2026"
+  // read like something had failed to load.
+  const period = (() => {
+    const { dateFrom, dateTo } = filters;
+    if (dateFrom && dateTo) return `${formatDate(dateFrom)} – ${formatDate(dateTo)}`;
+    if (dateTo) return `Everything up to ${formatDate(dateTo)}`;
+    if (dateFrom) return `${formatDate(dateFrom)} onwards`;
+    return 'Whole timeline · shipped and still to be planned';
+  })();
 
   const allColumns: Column<Shipment>[] = [
     {
