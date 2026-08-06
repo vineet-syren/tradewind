@@ -32,6 +32,7 @@ export function DataTable<T>({
   maxHeightCss,
   selectedRowKey,
   fill = false,
+  fillMinHeight = 320,
   fixedLayout = false,
 }: {
   columns: Column<T>[];
@@ -45,15 +46,18 @@ export function DataTable<T>({
   maxHeightCss?: string;
   selectedRowKey?: string | null;
   /**
-   * Take whatever height a flex-column parent has left and scroll inside it,
-   * rather than sizing to the rows. Wins over both max-height props.
+   * Grow into whatever height a flex-column parent has spare and scroll inside
+   * it, rather than sizing to the rows. Wins over both max-height props.
    *
-   * Prefer `maxHeightCss` with a viewport-relative clamp. This only works when
-   * the parent's height is definite *and* generous: in the split-pane register
-   * the cards and controls stacked above the table left it 25px to scroll 79 rows
-   * in. Whatever is left over is not a height you can rely on.
+   * Grow only — never shrink below `fillMinHeight`. That is the whole trick: a
+   * plain `flex: 1` took whatever was left over, and once the cards and controls
+   * above it had taken their share the register was left 25px to scroll 79 rows
+   * in. With a floor the parent grows instead, so the table is always usable and
+   * still stretches to match a taller sibling pane.
    */
   fill?: boolean;
+  /** Floor for `fill`, so a cramped parent cannot crush the table. */
+  fillMinHeight?: number;
   /**
    * Lay the table out to its container width instead of to its content, so
    * declared column widths hold and long cells ellipsis rather than pushing the
@@ -87,7 +91,16 @@ export function DataTable<T>({
   };
 
   return (
-    <TableContainer sx={fill ? { flex: 1, minHeight: 0 } : { maxHeight: maxHeightCss ?? maxHeight }}>
+    <TableContainer
+      sx={
+        fill
+          ? // Zero basis, so the rows do not set the height — the container's spare
+            // space does, floored at `fillMinHeight`. An `auto` basis makes the base
+            // size the full row stack, which stops it scrolling at all.
+            { flexGrow: 1, flexBasis: 0, minHeight: fillMinHeight, overflowY: 'auto' }
+          : { maxHeight: maxHeightCss ?? maxHeight }
+      }
+    >
       <Table
         size={dense ? 'small' : 'medium'}
         stickyHeader={fill || Boolean(maxHeightCss ?? maxHeight)}

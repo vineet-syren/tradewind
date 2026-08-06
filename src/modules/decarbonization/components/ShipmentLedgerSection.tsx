@@ -250,7 +250,7 @@ export function ShipmentLedgerSection({
     // panel opposite, so the register stretches to fill rather than leaving a gap
     // beside a taller right-hand panel. It is a floor, not a cap: the table keeps
     // its own scroll window, so nothing here can squeeze it.
-    <Box sx={compact ? { display: 'flex', flexDirection: 'column', minHeight: 0 } : undefined}>
+    <Box sx={compact ? { display: 'flex', flexDirection: 'column', flexGrow: 1, minHeight: 0 } : undefined}>
       <Card sx={{ mb: 2.5, flexShrink: 0 }}>
         <CardContent sx={{ py: 2 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap gap={2}>
@@ -290,6 +290,7 @@ export function ShipmentLedgerSection({
       </Card>
 
       <ChartContainer
+        fill={compact}
         title="Shipment register"
         guideKey="shipment-register"
         insights={rows.length ? insightsForRegister(rows) : undefined}
@@ -333,11 +334,14 @@ export function ShipmentLedgerSection({
             onRowClick={handleRow}
             selectedRowKey={selectedId ?? selected}
             initialSortKey="date"
-            // The table owns a viewport-relative scroll window rather than
-            // taking whatever the pane has left over. Filling a definite pane
-            // height meant the cards and controls stacked above it could starve
-            // the table down to a couple of rows.
-            maxHeightCss="clamp(320px, 62vh, 760px)"
+            // In the split the table stretches to whatever height the panel
+            // opposite has, so the two columns end level instead of leaving dead
+            // space beside a tall route panel — but never below `fillMinHeight`,
+            // so a short panel cannot starve it either. Standalone it keeps a
+            // viewport-relative window.
+            fill={compact}
+            fillMinHeight={340}
+            maxHeightCss={compact ? undefined : 'clamp(320px, 62vh, 760px)'}
             fixedLayout={compact}
           />
         )}

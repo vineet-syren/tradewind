@@ -1,20 +1,23 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Box, useMediaQuery, useTheme } from '@mui/material';
 
 /**
  * Horizontal resizable two-pane split with a draggable divider. Below `md` it
  * stacks vertically (no divider). The user can drag to rebalance left vs right.
  *
- * The left pane is given a *minimum* height that tracks the right one, so it
- * stretches to fill rather than leaving dead space beside a taller right pane.
- * The right pane is measured and the left sized from it — never the reverse,
- * which keeps the two from chasing each other.
+ * Both panes end level, and CSS alone decides where. The row stretches its
+ * children, so each pane is as tall as the taller one's content; a pane that
+ * wants to fill that height gives its scrollable child `flex-grow: 1` with a
+ * zero basis and a `min-height` floor.
  *
- * `minHeight`, not `height`, and that distinction matters: a definite height
- * forces every child to fit inside it, and once the pane's own chrome is
- * accounted for there can be almost nothing left. It squeezed the shipment
- * register's table to 25px of scroll for 79 rows. A minimum lets the pane grow
- * to its content while still never being shorter than its neighbour.
+ * This replaced a version that measured the right pane in JS and fed its height
+ * back as the left pane's. Two things went wrong with that. The measurement ran
+ * on render, but the right pane loads its detail asynchronously — so it latched
+ * onto the empty-state height and only corrected on the *next* selection, leaving
+ * the left column short beside a tall panel. A ResizeObserver was meant to cover
+ * that, and does in Chrome, but it is unavailable in some embedded browsers and
+ * there the pane never recovered at all. Letting the layout engine resolve it
+ * removes the race, the observer, and the fallbacks together.
  */
 export function SplitPane({
   left,
@@ -22,51 +25,18 @@ export function SplitPane({
   initial = 50,
   min = 28,
   max = 72,
-  minLeftHeight = 520,
 }: {
   left: ReactNode;
   right: ReactNode;
   initial?: number;
   min?: number;
   max?: number;
-  /** Floor for the left pane, so a short right pane cannot squash the list. */
-  minLeftHeight?: number;
 }) {
   const theme = useTheme();
   const stack = useMediaQuery(theme.breakpoints.down('md'));
   const [pct, setPct] = useState(initial);
-  const [rightHeight, setRightHeight] = useState<number | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const rightRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
-
-  const measureRight = () => {
-    const el = rightRef.current;
-    if (stack || !el) return;
-    const h = el.getBoundingClientRect().height;
-    // Bail out inside the setter when nothing moved, so this stays safe to call
-    // from an every-render layout effect.
-    setRightHeight((prev) => (prev !== null && Math.abs(prev - h) < 1 ? prev : h));
-  };
-
-  // Two triggers, because they catch different things. The layout effect runs on
-  // every render, so switching selection resizes in the same frame. The observer
-  // catches every height change that never re-renders this component — and that
-  // is the common one, since the right pane fetches its own detail and settles a
-  // turn or two after the click.
-  useLayoutEffect(measureRight);
-
-  useEffect(() => {
-    const el = rightRef.current;
-    if (stack || !el) {
-      setRightHeight(null);
-      return;
-    }
-    const ro = new ResizeObserver(measureRight);
-    ro.observe(el);
-    return () => ro.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stack]);
 
   useEffect(() => {
     const move = (e: MouseEvent) => {
@@ -105,18 +75,9 @@ export function SplitPane({
   };
 
   return (
-    <Box ref={wrapRef} sx={{ display: 'flex', alignItems: 'flex-start', width: '100%' }}>
-      <Box
-        sx={{
-          width: `${pct}%`,
-          minWidth: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          minHeight: rightHeight ? Math.max(rightHeight, minLeftHeight) : undefined,
-        }}
-      >
-        {left}
-      </Box>
+    // `stretch`, so both panes take the height of the taller one's content.
+    <Box ref={wrapRef} sx={{ display: 'flex', alignItems: 'stretch', width: '100%' }}>
+      <Box sx={{ width: `${pct}%`, minWidth: 0, display: 'flex', flexDirection: 'column' }}>{left}</Box>
       <Box
         role="separator"
         aria-orientation="vertical"
@@ -126,7 +87,6 @@ export function SplitPane({
         sx={{
           width: 16,
           flexShrink: 0,
-          alignSelf: 'stretch',
           cursor: 'col-resize',
           display: 'flex',
           alignItems: 'center',
@@ -136,9 +96,7 @@ export function SplitPane({
       >
         <Box className="tw-grip" sx={{ width: 4, height: 44, borderRadius: 2, bgcolor: 'divider', transition: 'height .15s, background-color .15s' }} />
       </Box>
-      {/* Height stays content-driven here — it is what the left pane is sized
-          from, so stretching it would make the two chase each other. */}
-      <Box ref={rightRef} sx={{ width: `calc(${100 - pct}% - 16px)`, minWidth: 0 }}>
+      <Box sx={{ width: `calc(${100 - pct}% - 16px)`, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         {right}
       </Box>
     </Box>

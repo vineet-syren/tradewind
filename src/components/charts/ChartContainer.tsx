@@ -69,8 +69,24 @@ export function ChartContainer({
     // one's chart is shorter, the body grows and centres it rather than leaving
     // the chart pinned to the top of the extra space — cheap insurance against
     // the dead-space problem reappearing on some future pairing.
-    <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', ...(fill && { minHeight: 0 }) }}>
-      <CardContent sx={{ flex: 1, display: 'flex', flexDirection: 'column', ...(fill && { minHeight: 0 }) }}>
+    <Card
+      sx={{
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        // Grow into spare height, but never shrink below what the content needs —
+        // Card sets `overflow: hidden`, so shrinking clips rather than scrolls.
+        ...(fill && { height: 'auto', flexGrow: 1, flexShrink: 0 }),
+      }}
+    >
+      <CardContent
+        sx={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          ...(fill && { flexGrow: 1, flexShrink: 0, minHeight: 0 }),
+        }}
+      >
         {(title || action || hasInsights || guide) && (
           // Wraps rather than compressing. In a narrow pane the title, the "?",
           // the Insights chip and two select boxes cannot sit on one line, and

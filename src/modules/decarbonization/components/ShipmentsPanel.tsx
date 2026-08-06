@@ -116,7 +116,7 @@ export function ShipmentsPanel() {
   ) : selectedLaneId ? (
     <LaneRoutePanel lane={exportLanes.find((l) => l.laneId === selectedLaneId)} onOpenLane={() => dispatch(setSelectedLane(selectedLaneId))} />
   ) : (
-    <Card sx={{ minHeight: 320, display: 'grid', placeItems: 'center' }}>
+    <Card sx={{ minHeight: 320, flexGrow: 1, display: 'grid', placeItems: 'center' }}>
       <CardContent>
         <EmptyState
           title="Select a shipment"
@@ -173,7 +173,11 @@ export function ShipmentsPanel() {
       <Box sx={{ mt: 3 }}>
         <SplitPane
           left={<ShipmentLedgerSection compact onRowSelect={selectShipment} selectedId={selectedShipment?.shipmentId} />}
-          right={<Box sx={{ position: { md: 'sticky' }, top: { md: 16 } }}>{detail}</Box>}
+          right={
+            <Box sx={{ position: { md: 'sticky' }, top: { md: 16 }, display: 'flex', flexDirection: 'column', flexGrow: 1 }}>
+              {detail}
+            </Box>
+          }
         />
       </Box>
     </Box>
